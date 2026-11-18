@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: #FFF5E8;
+    color: #252020;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.editorial-shadow {
+  box-shadow: 0 4px 0 0 #252020;
+}
+
+.editorial-shadow-sm {
+  box-shadow: 0 2px 0 0 #252020;
+}
+
+.sticker-shadow {
+  box-shadow: 2px 3px 0 0 #252020;
+}

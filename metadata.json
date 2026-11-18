@@ -1,0 +1,6 @@
+{
+  "name": "Outspace",
+  "description": "Career exploration and verified mentorship platform for high-school students in Pakistan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
