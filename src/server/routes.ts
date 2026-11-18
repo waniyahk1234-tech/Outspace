@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import multer from 'multer';
+import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { getDb, uuid, awardBadge, recalculateMentorReplyHours, recalculateMentorRating } from './db.js';
@@ -31,22 +32,37 @@ import { scheduleMongoSync, getMongoStatus } from './mongo.js';
 import { maskContactDetails, isBlockedBetween } from './safety.js';
 import { addRealtimeClient, emitToUsers } from './realtime.js';
 
-const uploadDir = path.resolve(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+const isServerlessRuntime = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+
+function resolveUploadDir(): string {
+  const localDir = path.resolve(process.cwd(), 'uploads');
+  try {
+    if (!fs.existsSync(localDir)) {
+      fs.mkdirSync(localDir, { recursive: true });
+    }
+    return localDir;
+  } catch {
+    const tmpDir = path.join(os.tmpdir(), 'outspace-uploads');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    return tmpDir;
+  }
 }
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.png';
-    cb(null, `avatar-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
+const storage = isServerlessRuntime
+  ? multer.memoryStorage()
+  : multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, resolveUploadDir()),
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname) || '.png';
+        cb(null, `avatar-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
+      },
+    });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 3 * 1024 * 1024 },
+  limits: { fileSize: isServerlessRuntime ? 1.5 * 1024 * 1024 : 3 * 1024 * 1024 },
 });
 
 function getAppBaseUrl(req: express.Request): string {
@@ -54,8 +70,14 @@ function getAppBaseUrl(req: express.Request): string {
   if (envUrl && envUrl !== 'MY_APP_URL') {
     return envUrl.replace(/\/+$/, '');
   }
-  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
-  const host = req.headers.host || 'localhost:3000';
+  const protoHeader = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+  const proto = protoHeader.split(',')[0].trim();
+  const hostHeader =
+    (req.headers['x-forwarded-host'] as string) ||
+    req.headers.host ||
+    process.env.VERCEL_URL ||
+    'localhost:3000';
+  const host = hostHeader.split(',')[0].trim();
   return `${proto}://${host}`;
 }
 
@@ -869,7 +891,9 @@ export function createApiRouter() {
       res.status(400).json({ error: 'Please select an image file to upload.' });
       return;
     }
-    const avatarUrl = `/uploads/${req.file.filename}`;
+    const avatarUrl = req.file.buffer
+      ? `data:${req.file.mimetype || 'image/png'};base64,${req.file.buffer.toString('base64')}`
+      : `/uploads/${req.file.filename}`;
     db.prepare(`UPDATE profiles SET avatar_url = ? WHERE id = ?`).run(avatarUrl, req.userId!);
     res.json({ ok: true, avatar_url: avatarUrl });
   });

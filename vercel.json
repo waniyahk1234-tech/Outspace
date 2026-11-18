@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "bun install",
+  "buildCommand": "bun run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30,
+      "includeFiles": "{src/server/**,src/shared/**}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/((?!api/|assets/|src/assets/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

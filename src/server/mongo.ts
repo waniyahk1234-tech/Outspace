@@ -33,6 +33,7 @@ let mongoConnected = false;
 let mongoLastError: string | null = null;
 let syncInFlight: Promise<void> | null = null;
 let syncPending = false;
+let lastPullAt = 0;
 
 function getDocumentKey(table: CollectionName, row: Record<string, unknown>): Record<string, unknown> {
   if (table === 'mentor_details') return { profile_id: row.profile_id };
@@ -49,6 +50,10 @@ export async function initMongoBridge(sqliteDb: Database.Database): Promise<void
     return;
   }
 
+  if (mongoClient && mongoConnected && mongoDb) {
+    return;
+  }
+
   const dbName = process.env.MONGODB_DB_NAME?.trim() || 'outspace';
   try {
     mongoClient = new MongoClient(uri, {
@@ -59,6 +64,7 @@ export async function initMongoBridge(sqliteDb: Database.Database): Promise<void
     await mongoDb.command({ ping: 1 });
     mongoConnected = true;
     mongoLastError = null;
+    lastPullAt = Date.now();
     console.log(`[MongoDB] Connected successfully to database "${dbName}".`);
 
     await ensureMongoIndexes(mongoDb);
@@ -189,6 +195,28 @@ export function scheduleMongoSync(sqliteDb: Database.Database): void {
       }
     }
   })();
+}
+
+export async function flushMongoSync(sqliteDb: Database.Database): Promise<void> {
+  if (!mongoConnected || !mongoDb) return;
+  if (syncInFlight) {
+    await syncInFlight;
+  }
+  if (syncPending) {
+    syncPending = false;
+    await pushAllSqliteToMongo(sqliteDb);
+  }
+}
+
+export async function refreshFromMongoIfStale(sqliteDb: Database.Database, maxAgeMs = 2500): Promise<void> {
+  if (!mongoConnected || !mongoDb || syncInFlight) return;
+  if (Date.now() - lastPullAt < maxAgeMs) return;
+  try {
+    await pullMongoChangesIntoSqlite(sqliteDb);
+    lastPullAt = Date.now();
+  } catch (err) {
+    mongoLastError = (err as Error).message;
+  }
 }
 
 export function getMongoStatus() {

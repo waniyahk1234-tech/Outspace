@@ -1,9 +1,23 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-const DB_PATH = path.resolve(process.cwd(), 'outspace.db');
+function resolveDbPath(): string {
+  if (process.env.VERCEL || process.env.VERCEL_ENV) {
+    return path.join(os.tmpdir(), 'outspace.db');
+  }
+  try {
+    fs.accessSync(process.cwd(), fs.constants.W_OK);
+    return path.resolve(process.cwd(), 'outspace.db');
+  } catch {
+    return path.join(os.tmpdir(), 'outspace.db');
+  }
+}
+
+const DB_PATH = resolveDbPath();
 
 let dbInstance: Database.Database | null = null;
 

@@ -23,9 +23,18 @@ async function startServer() {
   app.use(cookieParser());
 
   // Serve uploaded avatars
-  const uploadDir = path.resolve(process.cwd(), 'uploads');
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+  const defaultUploadDir = path.resolve(process.cwd(), 'uploads');
+  let uploadDir = defaultUploadDir;
+  try {
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+  } catch {
+    const os = await import('os');
+    uploadDir = path.join(os.tmpdir(), 'outspace-uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
   }
   app.use('/uploads', express.static(uploadDir));
 

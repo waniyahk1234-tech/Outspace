@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+outspace.db*
+uploads/
+.vercel
+
