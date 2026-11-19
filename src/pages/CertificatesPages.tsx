@@ -243,7 +243,7 @@ export function VerifyCertificatePage() {
           <BrandLogo />
         </Link>
         <Link to="/signup" className="text-xs font-bold text-[#C83D42] hover:underline">
-          Explore Outspace →
+          Explore Outpase →
         </Link>
       </header>
 

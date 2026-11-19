@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -18,6 +18,13 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch, setSessionToken, useAuth } from '../lib/api';
+import {
+  consumeGoogleRedirectResult,
+  getFirebaseProjectId,
+  isEmbeddedIframe,
+  signInWithGooglePopup,
+  startGoogleRedirect,
+} from '../lib/firebaseAuth';
 import { BrandLogo, Starburst } from '../components/BrandMark';
 
 function GoogleGIcon() {
@@ -43,28 +50,19 @@ function GoogleGIcon() {
   );
 }
 
-function LinkedInIcon() {
-  return (
-    <span
-      aria-hidden="true"
-      className="w-4 h-4 rounded-[4px] bg-[#0A66C2] text-white font-display font-bold text-[10px] leading-none flex items-center justify-center shrink-0"
-    >
-      in
-    </span>
-  );
-}
-
 interface OAuthSetupInfo {
-  provider: 'google' | 'linkedin';
+  provider: 'google' | 'firebase_domain';
   redirectUri: string;
   requiredEnv: string[];
+  projectId?: string;
 }
 
 function OAuthSetupModal({ info, onClose }: { info: OAuthSetupInfo; onClose: () => void }) {
-  const label = info.provider === 'google' ? 'Gmail (Google)' : 'LinkedIn';
+  const isDomain = info.provider === 'firebase_domain';
+  const label = isDomain ? 'Vercel / Custom Domain' : 'Gmail (Google)';
   const copyUri = () => {
     navigator.clipboard?.writeText(info.redirectUri);
-    toast.success('Callback URL copied!');
+    toast.success(isDomain ? 'Domain copied!' : 'Callback URL copied!');
   };
 
   return (
@@ -72,8 +70,12 @@ function OAuthSetupModal({ info, onClose }: { info: OAuthSetupInfo; onClose: () 
       <div className="bg-white rounded-3xl border-2 border-[#252020] editorial-shadow max-w-md w-full p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xs font-mono font-bold text-[#C83D42] uppercase">OAuth Credentials Needed</div>
-            <h3 className="font-display text-xl font-bold mt-0.5">Connect {label} Login</h3>
+            <div className="text-xs font-mono font-bold text-[#C83D42] uppercase">
+              {isDomain ? 'Authorize Domain for Gmail' : 'OAuth Credentials Needed'}
+            </div>
+            <h3 className="font-display text-xl font-bold mt-0.5">
+              {isDomain ? 'Allow this domain for Gmail Login' : `Connect ${label} Login`}
+            </h3>
           </div>
           <button
             type="button"
@@ -85,31 +87,49 @@ function OAuthSetupModal({ info, onClose }: { info: OAuthSetupInfo; onClose: () 
           </button>
         </div>
 
-        <p className="text-xs text-[#4D4242] leading-relaxed">
-          To enable one-click {label} sign-in for students and mentors, register this authorized redirect URI in your{' '}
-          {info.provider === 'google' ? 'Google Cloud Console' : 'LinkedIn Developer App'} and add the two keys to AI
-          Studio Secrets:
-        </p>
+        {isDomain ? (
+          <p className="text-xs text-[#4D4242] leading-relaxed">
+            Gmail sign-in is live, and this deployment hostname just needs to be allowlisted once in{' '}
+            <span className="font-bold">Firebase Console → Authentication → Settings → Authorized domains</span>
+            {info.projectId ? (
+              <>
+                {' '}
+                (Project: <code className="font-mono font-bold">{info.projectId}</code>)
+              </>
+            ) : null}
+            :
+          </p>
+        ) : (
+          <p className="text-xs text-[#4D4242] leading-relaxed">
+            To enable one-click {label} sign-in for students and mentors (including Vercel & mobile), configure Google
+            OAuth credentials in your Google Cloud Console, register this Authorized Redirect URI, and add the two keys
+            to Secrets / Vercel Env Vars:
+          </p>
+        )}
 
         <div className="p-3 rounded-xl bg-[#FFF5E8] border-2 border-[#252020] space-y-1.5">
-          <div className="text-[11px] font-bold text-[#5A4F4F]">Authorized Redirect URI</div>
+          <div className="text-[11px] font-bold text-[#5A4F4F]">
+            {isDomain ? 'Domain to Authorize' : 'Authorized Redirect URL'}
+          </div>
           <div className="flex items-center gap-2">
             <code className="text-[11px] font-mono break-all flex-1 text-[#252020]">{info.redirectUri}</code>
             <button
               type="button"
               onClick={copyUri}
               className="p-1.5 rounded-lg bg-[#F6D66D] border border-[#252020] shrink-0"
-              title="Copy URL"
+              title="Copy"
             >
               <Copy className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        <div className="p-3 rounded-xl bg-[#F6D66D]/35 border border-[#252020]/40 text-xs space-y-1">
-          <div className="font-bold">Environment Secrets Required:</div>
-          <div className="font-mono text-[11px]">{info.requiredEnv.join(', ')}</div>
-        </div>
+        {!isDomain && info.requiredEnv.length > 0 && (
+          <div className="p-3 rounded-xl bg-[#F6D66D]/35 border border-[#252020]/40 text-xs space-y-1">
+            <div className="font-bold">Environment Variables Required:</div>
+            <div className="font-mono text-[11px]">{info.requiredEnv.join(', ')}</div>
+          </div>
+        )}
 
         <button
           type="button"
@@ -124,61 +144,220 @@ function OAuthSetupModal({ info, onClose }: { info: OAuthSetupInfo; onClose: () 
 }
 
 function useOAuthPopup(
-  onSuccess: (payload: { token: string; role: string; onboarding_complete: boolean }) => Promise<void>
+  onSuccess: (payload: { token: string; role: string; onboarding_complete: boolean }) => Promise<void>,
+  currentPath: '/login' | '/signup' = '/login'
 ) {
   const [setupModal, setSetupModal] = useState<OAuthSetupInfo | null>(null);
-  const [oauthBusy, setOauthBusy] = useState<'google' | 'linkedin' | null>(null);
+  const [oauthBusy, setOauthBusy] = useState<'google' | null>(null);
+  const onSuccessRef = useRef(onSuccess);
+  onSuccessRef.current = onSuccess;
 
   useEffect(() => {
+    let active = true;
+
+    // 1. Handle redirect-based OAuth completion (mobile browsers, Vercel standalone tabs)
+    const rawHash = window.location.hash;
+    if (rawHash && (rawHash.includes('oauth_token=') || rawHash.includes('oauth_error='))) {
+      const hashParams = new URLSearchParams(rawHash.replace(/^#/, ''));
+      const oauthToken = hashParams.get('oauth_token');
+      const oauthError = hashParams.get('oauth_error');
+      const role = hashParams.get('role') || 'student';
+      const onboardingComplete = hashParams.get('onboarding') === '1';
+
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      if (oauthToken) {
+        setOauthBusy('google');
+        Promise.resolve(onSuccessRef.current({ token: oauthToken, role, onboarding_complete: onboardingComplete })).finally(() => {
+          if (active) setOauthBusy(null);
+        });
+      } else if (oauthError) {
+        toast.error(oauthError);
+      }
+    }
+
+    // 2. Handle Firebase Google redirect completion (mobile/in-app browser fallback)
+    consumeGoogleRedirectResult()
+      .then(async (redirectCreds) => {
+        if (!active || !redirectCreds) return;
+        setOauthBusy('google');
+        const res = await apiFetch<{
+          ok: boolean;
+          token: string;
+          profile: { role: string; onboarding_complete: boolean };
+        }>('/api/auth/oauth/google/firebase', {
+          method: 'POST',
+          body: JSON.stringify({
+            idToken: redirectCreds.idToken,
+            accessToken: redirectCreds.accessToken,
+            role: redirectCreds.role,
+          }),
+        });
+        await onSuccessRef.current({
+          token: res.token,
+          role: res.profile.role,
+          onboarding_complete: Boolean(res.profile.onboarding_complete),
+        });
+      })
+      .catch((err) => {
+        if (active && err) {
+          toast.error((err as Error).message || 'Google sign-in failed.');
+        }
+      })
+      .finally(() => {
+        if (active) setOauthBusy(null);
+      });
+
+    // 3. Handle iframe popup postMessage completion
     const onMessage = (event: MessageEvent) => {
       const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost') && origin !== window.location.origin) {
+      if (
+        !origin.endsWith('.run.app') &&
+        !origin.endsWith('.vercel.app') &&
+        !origin.includes('localhost') &&
+        origin !== window.location.origin
+      ) {
         return;
       }
       if (event.data?.type === 'OUTSPACE_OAUTH_SUCCESS' && event.data?.token) {
         setOauthBusy(null);
-        onSuccess(event.data);
+        onSuccessRef.current(event.data);
       } else if (event.data?.type === 'OUTSPACE_OAUTH_ERROR') {
         setOauthBusy(null);
         toast.error(event.data.error || 'OAuth login failed.');
       }
     };
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, [onSuccess]);
+    return () => {
+      active = false;
+      window.removeEventListener('message', onMessage);
+    };
+  }, []);
 
-  const launchOAuth = async (provider: 'google' | 'linkedin', role: 'student' | 'mentor') => {
-    setOauthBusy(provider);
-    try {
-      const res = await apiFetch<{
-        configured: boolean;
-        url?: string;
-        redirectUri: string;
-        requiredEnv?: string[];
-      }>(`/api/auth/oauth/${provider}/url?role=${role}`);
+  const launchServerOAuth = async (
+    provider: 'google',
+    role: 'student' | 'mentor',
+    preOpenedWindow: Window | null = null
+  ) => {
+    const inIframe = isEmbeddedIframe();
+    const mode = inIframe ? 'popup' : 'redirect';
+    const query = new URLSearchParams({
+      role,
+      mode,
+      return_origin: window.location.origin,
+      return_path: currentPath,
+    });
+    const res = await apiFetch<{
+      configured: boolean;
+      url?: string;
+      redirectUri: string;
+      requiredEnv?: string[];
+    }>(`/api/auth/oauth/${provider}/url?${query.toString()}`);
 
-      if (!res.configured || !res.url) {
-        setOauthBusy(null);
-        setSetupModal({
-          provider,
-          redirectUri: res.redirectUri,
-          requiredEnv:
-            res.requiredEnv ||
-            (provider === 'google'
-              ? ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET']
-              : ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET']),
-        });
-        return;
-      }
+    if (!res.configured || !res.url) {
+      if (preOpenedWindow && !preOpenedWindow.closed) preOpenedWindow.close();
+      setOauthBusy(null);
+      setSetupModal({
+        provider,
+        redirectUri: res.redirectUri,
+        requiredEnv: res.requiredEnv || ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+      });
+      return;
+    }
 
+    if (mode === 'redirect') {
+      if (preOpenedWindow && !preOpenedWindow.closed) preOpenedWindow.close();
+      window.location.assign(res.url);
+      return;
+    }
+
+    if (preOpenedWindow && !preOpenedWindow.closed) {
+      preOpenedWindow.location.href = res.url;
+    } else {
       const authWin = window.open(res.url, 'outspace_oauth_popup', 'width=560,height=680');
       if (!authWin) {
         setOauthBusy(null);
         toast.error('Popup was blocked by your browser. Please allow popups for this site.');
       }
-    } catch (err) {
+    }
+  };
+
+  const launchOAuth = async (provider: 'google', role: 'student' | 'mentor') => {
+    setOauthBusy(provider);
+    const inIframe = isEmbeddedIframe();
+
+    try {
+      // Call Firebase popup directly in click handler so mobile/desktop browsers treat it as user-initiated
+      const creds = await signInWithGooglePopup();
+      const res = await apiFetch<{
+        ok: boolean;
+        token: string;
+        profile: { role: string; onboarding_complete: boolean };
+      }>('/api/auth/oauth/google/firebase', {
+        method: 'POST',
+        body: JSON.stringify({
+          idToken: creds.idToken,
+          accessToken: creds.accessToken,
+          role,
+        }),
+      });
       setOauthBusy(null);
-      toast.error((err as Error).message);
+      await onSuccess({
+        token: res.token,
+        role: res.profile.role,
+        onboarding_complete: Boolean(res.profile.onboarding_complete),
+      });
+      return;
+    } catch (err) {
+      const fbErr = err as { code?: string; message?: string };
+      const code = fbErr?.code || '';
+
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setOauthBusy(null);
+        return;
+      }
+
+      // Mobile / webview popup blocked -> use full-page redirect when top-level
+      if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+        if (!inIframe) {
+          try {
+            await startGoogleRedirect(role, currentPath);
+            return;
+          } catch (redirectErr) {
+            setOauthBusy(null);
+            toast.error((redirectErr as Error).message || 'Could not start Google redirect.');
+            return;
+          }
+        }
+        setOauthBusy(null);
+        toast.error('Popup was blocked by your browser. Please allow popups and tap again.');
+        return;
+      }
+
+      // Deployed to un-whitelisted Vercel domain -> fallback to server Google OAuth if configured, else show domain helper
+      if (code === 'auth/unauthorized-domain') {
+        try {
+          const check = await apiFetch<{ configured: boolean }>(`/api/auth/oauth/google/url?role=${role}`);
+          if (check.configured) {
+            await launchServerOAuth('google', role);
+            return;
+          }
+        } catch {
+          // fall through to modal
+        }
+        setOauthBusy(null);
+        setSetupModal({
+          provider: 'firebase_domain',
+          redirectUri: window.location.hostname,
+          requiredEnv: [],
+          projectId: getFirebaseProjectId(),
+        });
+        return;
+      }
+
+      setOauthBusy(null);
+      toast.error(fbErr?.message || 'Google sign-in failed.');
+      return;
     }
   };
 
@@ -385,7 +564,7 @@ export function SignupPage() {
   const finishAuthNavigation = async (token: string, profile: { role: string; onboarding_complete: boolean }) => {
     setSessionToken(token);
     await refreshUser();
-    toast.success('Welcome to Outspace!');
+    toast.success('Welcome to Outpase!');
     if (!profile.onboarding_complete) {
       navigate('/onboarding');
     } else if (profile.role === 'admin') {
@@ -400,7 +579,7 @@ export function SignupPage() {
       role: payload.role,
       onboarding_complete: payload.onboarding_complete,
     });
-  });
+  }, '/signup');
 
   const onSubmit = async (values: SignupValues) => {
     if (!role) return;
@@ -460,7 +639,7 @@ export function SignupPage() {
               <div className="flex items-center gap-2.5">
                 <Starburst size={22} color="#F6D66D" />
                 <div>
-                  <h1 className="font-display text-3xl font-bold text-[#252020]">Join Outspace</h1>
+                  <h1 className="font-display text-3xl font-bold text-[#252020]">Join Outpase</h1>
                   <p className="mt-0.5 text-sm text-[#5A4F4F]">Choose how you will explore or mentor.</p>
                 </div>
               </div>
@@ -510,30 +689,20 @@ export function SignupPage() {
                   <h1 className="font-display text-2xl font-bold">
                     Create {role === 'student' ? 'Student' : 'Mentor'} Account
                   </h1>
-                  <p className="text-xs text-[#6B5E5E]">Sign up with Gmail, LinkedIn, or verified email</p>
+                  <p className="text-xs text-[#6B5E5E]">Sign up with Gmail or verified email</p>
                 </div>
               </div>
 
-              {/* Gmail & LinkedIn Sign Up for both Students and Mentors */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Gmail Sign Up for both Students and Mentors */}
+              <div>
                 <button
                   type="button"
                   disabled={oauthBusy !== null}
                   onClick={() => launchOAuth('google', role)}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl border-2 border-[#252020] bg-white text-xs font-bold hover:bg-[#FFF5E8] transition-colors disabled:opacity-60"
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl border-2 border-[#252020] bg-white text-xs font-bold hover:bg-[#FFF5E8] transition-colors disabled:opacity-60"
                 >
                   <GoogleGIcon />
                   <span>{oauthBusy === 'google' ? 'Connecting...' : 'Continue with Gmail'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={oauthBusy !== null}
-                  onClick={() => launchOAuth('linkedin', role)}
-                  className="flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl border-2 border-[#252020] bg-white text-xs font-bold hover:bg-[#FFF5E8] transition-colors disabled:opacity-60"
-                >
-                  <LinkedInIcon />
-                  <span>{oauthBusy === 'linkedin' ? 'Connecting...' : 'Continue with LinkedIn'}</span>
                 </button>
               </div>
 
@@ -647,7 +816,7 @@ export function SignupPage() {
                         {...register('guardian_consent')}
                         className="mt-0.5 w-4 h-4 accent-[#C83D42] rounded"
                       />
-                      <span>I am 18+ or my parent/guardian agrees to me using Outspace</span>
+                      <span>I am 18+ or my parent/guardian agrees to me using Outpase</span>
                     </label>
                     {errors.guardian_consent && (
                       <p className="mt-1.5 text-xs text-[#C83D42]">{errors.guardian_consent.message}</p>
@@ -718,7 +887,7 @@ export function LoginPage() {
       role: payload.role,
       onboarding_complete: payload.onboarding_complete,
     });
-  });
+  }, '/login');
 
   const doLogin = async (values: LoginValues) => {
     try {
@@ -768,7 +937,7 @@ export function LoginPage() {
             <BrandLogo />
           </Link>
           <Link to="/signup" className="text-sm font-bold text-[#C83D42] hover:underline">
-            New to Outspace? Sign up
+            New to Outpase? Sign up
           </Link>
         </div>
 
@@ -786,14 +955,14 @@ export function LoginPage() {
               <div>
                 <h1 className="font-display text-3xl font-bold">Welcome back</h1>
                 <p className="mt-1 text-sm text-[#5A4F4F]">
-                  Log in manually or with Gmail or LinkedIn.
+                  Log in manually or with Gmail.
                 </p>
               </div>
 
-              {/* Student / Mentor Role Switch + Gmail & LinkedIn OAuth */}
+              {/* Student / Mentor Role Switch + Gmail OAuth */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-bold text-[#5A4F4F]">Account type (for new social sign-in):</span>
+                  <span className="font-bold text-[#5A4F4F]">Account type (for new Gmail sign-in):</span>
                   <div className="inline-flex rounded-xl border-2 border-[#252020] bg-[#FFF5E8] p-0.5">
                     {(['student', 'mentor'] as const).map((r) => (
                       <button
@@ -810,25 +979,15 @@ export function LoginPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
                   <button
                     type="button"
                     disabled={oauthBusy !== null}
                     onClick={() => launchOAuth('google', oauthRole)}
-                    className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border-2 border-[#252020] bg-white text-xs font-bold hover:bg-[#FFF5E8] transition-colors disabled:opacity-60"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border-2 border-[#252020] bg-white text-xs font-bold hover:bg-[#FFF5E8] transition-colors disabled:opacity-60"
                   >
                     <GoogleGIcon />
-                    <span>{oauthBusy === 'google' ? 'Connecting...' : 'Gmail Login'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={oauthBusy !== null}
-                    onClick={() => launchOAuth('linkedin', oauthRole)}
-                    className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border-2 border-[#252020] bg-white text-xs font-bold hover:bg-[#FFF5E8] transition-colors disabled:opacity-60"
-                  >
-                    <LinkedInIcon />
-                    <span>{oauthBusy === 'linkedin' ? 'Connecting...' : 'LinkedIn Login'}</span>
+                    <span>{oauthBusy === 'google' ? 'Connecting...' : 'Continue with Gmail'}</span>
                   </button>
                 </div>
               </div>

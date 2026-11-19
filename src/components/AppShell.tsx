@@ -9,6 +9,7 @@ import {
   Users,
   Award,
   BookOpen,
+  Trophy,
   CreditCard,
   ShieldCheck,
   Settings,
@@ -54,11 +55,12 @@ export function AppShell({ children, title }: { children: React.ReactNode; title
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: Home },
     { to: '/explore', label: 'Explore', icon: Compass },
+    { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     { to: '/connections', label: 'Connections', icon: Users, badge: user.pending_requests_count },
     { to: '/messages', label: 'Messages', icon: MessageSquare },
     { to: '/sessions', label: 'My Sessions', icon: CalendarCheck },
     { to: '/groups', label: 'Groups', icon: Users },
-    { to: '/quizzes', label: 'Quizzes', icon: BookOpen },
+    { to: '/courses', label: 'Courses', icon: BookOpen },
     { to: `/u/${user.id}`, label: 'Career Passport', icon: Award },
     ...(user.role === 'student' ? [{ to: '/pricing', label: 'Pricing & Plan', icon: CreditCard }] : []),
     ...(user.role === 'admin' ? [{ to: '/admin', label: 'Admin Review', icon: ShieldCheck }] : []),
@@ -68,9 +70,10 @@ export function AppShell({ children, title }: { children: React.ReactNode; title
   const topQuickNav = [
     { to: '/dashboard', label: 'Home' },
     { to: '/explore', label: 'Explore' },
+    { to: '/leaderboard', label: 'Leaderboard' },
     { to: '/groups', label: 'Groups' },
     { to: '/sessions', label: 'Sessions' },
-    { to: '/quizzes', label: 'Quizzes' },
+    { to: '/courses', label: 'Courses' },
   ];
 
   const mobileTabs = [
@@ -182,7 +185,7 @@ export function AppShell({ children, title }: { children: React.ReactNode; title
               <BrandLogo />
             </Link>
             <span className="hidden lg:block font-display text-sm font-bold text-[#252020] truncate">
-              {title || 'Outspace'}
+              {title || 'Outpase'}
             </span>
             <nav className="hidden md:flex items-center gap-5" aria-label="Quick navigation">
               {topQuickNav.map((item) => {

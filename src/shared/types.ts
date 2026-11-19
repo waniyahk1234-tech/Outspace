@@ -24,17 +24,116 @@ export interface Profile {
   created_at: string;
 }
 
+export const ACTIVE_TRACK_SLUGS = ['entrepreneurship', 'psychology', 'social-impact'] as const;
+
+export function isActiveTrackSlug(slug: string): boolean {
+  return (ACTIVE_TRACK_SLUGS as readonly string[]).includes(slug);
+}
+
+export interface ProfessionalProfile {
+  profile_id: string;
+  linkedin_sub: string | null;
+  linkedin_email: string | null;
+  linkedin_verified: boolean;
+  linkedin_profile_url: string | null;
+  headline: string | null;
+  current_role: string | null;
+  organization: string | null;
+  industry: string | null;
+  locale: string | null;
+  synced_at: string;
+  updated_at: string;
+}
+
 export interface MentorDetails {
   profile_id: string;
   profession: string;
   company: string | null;
   years_experience: number | null;
   linkedin_url: string;
+  talk_url?: string | null;
   niches: string[];
+  topics?: string[];
+  preferred_slots?: string[];
+  auto_welcome_message?: string | null;
+  vip_code?: string | null;
+  vip_partner?: string | null;
+  verification_submitted_at?: string | null;
+  verification_deadline_at?: string | null;
+  is_demo?: boolean;
+  monthly_connections_used?: number;
+  monthly_connections_limit?: number;
   status: MentorStatus;
   avg_reply_hours: number | null;
   rating: number | null;
   sessions_completed: number;
+  linkedin_verified?: boolean;
+}
+
+export interface CourseAssignment {
+  id: string;
+  course_id: string;
+  course_title?: string;
+  niche_slug?: string;
+  student_id: string;
+  submission_type: 'video' | 'presentation';
+  title: string;
+  summary: string;
+  asset_url: string;
+  score: number;
+  created_at: string;
+}
+
+export interface MentorUpdate {
+  id: string;
+  mentor_id: string;
+  mentor_name?: string;
+  mentor_avatar?: string | null;
+  mentor_profession?: string;
+  mentor_company?: string | null;
+  kind: 'update' | 'masterclass' | 'cohort';
+  title: string;
+  body: string;
+  media_url: string | null;
+  event_at: string | null;
+  created_at: string;
+}
+
+export interface GroupQASession {
+  id: string;
+  mentor_id: string;
+  mentor_name?: string;
+  mentor_avatar?: string | null;
+  mentor_profession?: string | null;
+  group_id: string | null;
+  group_name?: string | null;
+  topic: string;
+  meet_url: string;
+  start_at: string;
+  end_at: string;
+  status: string;
+  rsvp_count: number;
+  has_rsvped: boolean;
+  created_at: string;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  student_id: string;
+  student_name: string;
+  avatar_url: string | null;
+  city: string | null;
+  grade_level: string | null;
+  school_name: string | null;
+  score: number;
+  courses_completed: number;
+  assignments_count: number;
+  competition_count: number;
+  is_winner: boolean;
+  is_top_5: boolean;
+  latest_pitch_title?: string | null;
+  latest_track?: string | null;
+  assignments: CourseAssignment[];
 }
 
 export interface Subscription {
@@ -62,6 +161,63 @@ export interface Niche {
   universities: string[];
   riasec_codes: string[];
   icon: string;
+  is_active_track?: boolean;
+}
+
+export interface CourseModule {
+  id: string;
+  course_id: string;
+  position: number;
+  title: string;
+  speaker_name: string;
+  speaker_role: string;
+  duration_seconds: number;
+  video_url: string | null;
+  summary: string;
+  key_takeaways: string[];
+}
+
+export interface CourseSummary {
+  id: string;
+  niche_slug: string;
+  niche_name: string | null;
+  author_id: string;
+  author_name: string | null;
+  author_avatar?: string | null;
+  title: string;
+  subtitle: string;
+  description: string;
+  duration_label: string;
+  is_coming_soon: boolean;
+  competition_title: string;
+  competition_brief: string;
+  meetup_title: string;
+  meetup_venue: string;
+  meetup_date_label: string;
+  module_count: number;
+  completed_count: number;
+  cohort_count: number;
+  has_entered_competition: boolean;
+  has_submitted_assignment?: boolean;
+}
+
+export interface CompetitionEntry {
+  id: string;
+  course_id: string;
+  student_id: string;
+  cycle_month: string;
+  pitch_title: string;
+  problem_statement: string;
+  solution_summary: string;
+  pitch_link: string | null;
+  in_person_rsvp: boolean;
+  status: string;
+  rank?: number | null;
+  score?: number;
+  mentor_feedback: string | null;
+  certificate_id: string | null;
+  verify_code?: string | null;
+  created_at: string;
 }
 
 export interface Badge {
@@ -125,4 +281,6 @@ export const BADGE_META: Record<string, { description: string; accent: string }>
   seminar_5: { description: 'Attended 5 group seminars', accent: 'bg-[#F6D66D]/50 text-[#252020] border-[#D9B036]' },
   quiz_ace: { description: 'Scored 80% or higher on a mentor quiz', accent: 'bg-[#F6D66D]/40 text-[#252020] border-[#E6BE42]' },
   contributor: { description: 'Shared 5 or more helpful posts in groups', accent: 'bg-[#F7A98A]/35 text-[#252020] border-[#E58A65]' },
+  course_fellow: { description: 'Watched every video module in a track course', accent: 'bg-[#F6D66D]/50 text-[#252020] border-[#E6BE42]' },
+  competition_honours: { description: 'Competed in the monthly pitch & networking showcase', accent: 'bg-[#C83D42]/15 text-[#9C252A] border-[#C83D42]/40' },
 };

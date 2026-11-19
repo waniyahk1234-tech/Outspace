@@ -31,6 +31,103 @@ import {
 import { scheduleMongoSync, getMongoStatus } from './mongo.js';
 import { maskContactDetails, isBlockedBetween } from './safety.js';
 import { addRealtimeClient, emitToUsers } from './realtime.js';
+import { isActiveTrackSlug } from '../shared/types.js';
+
+function getCurrentCycleMonth(): string {
+  const now = new Date();
+  const pkt = new Date(now.getTime() + 5 * 3600 * 1000);
+  const y = pkt.getUTCFullYear();
+  const m = String(pkt.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+function getDaysLeftInCycle(): number {
+  const now = new Date();
+  const pkt = new Date(now.getTime() + 5 * 3600 * 1000);
+  const year = pkt.getUTCFullYear();
+  const month = pkt.getUTCMonth();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return Math.max(1, lastDay - pkt.getUTCDate() + 1);
+}
+
+function getCycleEndIso(): string {
+  const now = new Date();
+  const pkt = new Date(now.getTime() + 5 * 3600 * 1000);
+  const year = pkt.getUTCFullYear();
+  const month = pkt.getUTCMonth();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const monthStr = String(month + 1).padStart(2, '0');
+  const dayStr = String(lastDay).padStart(2, '0');
+  return `${year}-${monthStr}-${dayStr}T23:59:59+05:00`;
+}
+
+function generateMentorFollowupReply(params: {
+  studentName: string;
+  studentMessage: string;
+  mentorName: string;
+  profession: string;
+  company: string | null;
+  talkUrl: string | null;
+  niches: string[];
+}): string {
+  const firstStudent = params.studentName.split(' ')[0] || 'there';
+  const firstMentor = params.mentorName.split(' ')[0] || params.mentorName;
+  const msg = params.studentMessage.toLowerCase();
+
+  if (msg.includes('slot') || msg.includes('time') || msg.includes('1:1') || msg.includes('book') || msg.includes('call') || msg.includes('meet')) {
+    return `Great question, ${firstStudent}! I keep open evening PKT slots on my profile—just click "Select Time" on my profile or head to My Sessions to lock in a slot and generate your Meet link. Looking forward to speaking with you! — ${firstMentor}`;
+  }
+  if (msg.includes('uni') || msg.includes('degree') || msg.includes('lums') || msg.includes('nust') || msg.includes('iba') || msg.includes('fast') || msg.includes('aku') || msg.includes('major')) {
+    return `Good thinking asking early, ${firstStudent}. In ${params.profession.toLowerCase()}, your portfolio, real projects, and hands-on curiosity matter just as much as the university name. Book a 1:1 slot on my profile and we can compare your A-Level/FSc options together! — ${firstMentor}`;
+  }
+  if (msg.includes('pitch') || msg.includes('compet') || msg.includes('course') || msg.includes('startup') || msg.includes('idea')) {
+    return `Awesome initiative, ${firstStudent}! Start by interviewing 5 classmates or community members about the exact pain point before building slides. Once you finish the course videos, submit your pitch before month-end so we can review it at the showcase! — ${firstMentor}`;
+  }
+  if (msg.includes('salary') || msg.includes('pay') || msg.includes('scope') || msg.includes('day') || msg.includes('work') || msg.includes('career')) {
+    return `Happy to share an honest look inside ${params.company || 'the field'}, ${firstStudent}. My days as ${params.profession} split between deep problem-solving and collaborating with teams across Pakistan. Drop more questions anytime or book a quick 1:1! — ${firstMentor}`;
+  }
+  if (msg.includes('thank') || msg.includes('shukriya') || msg.includes('ok') || msg.includes('sure')) {
+    return `Anytime, ${firstStudent}! Keep exploring with confidence—message me whenever a new question pops up or grab one of my open 1:1 PKT slots. — ${firstMentor}`;
+  }
+
+  return `Thanks for sharing that, ${firstStudent}! From my experience as ${params.profession}${params.company ? ` at ${params.company}` : ''}, the fastest way to get clarity in ${params.niches[0]?.replace(/-/g, ' ') || 'this field'} is testing small projects early and asking specific questions. Feel free to book a 1:1 PKT slot on my profile whenever you'd like to dive deeper! — ${firstMentor}`;
+}
+
+function generateMentorBotReply(params: {
+  studentName: string;
+  studentMessage: string;
+  mentorName: string;
+  profession: string;
+  company: string | null;
+  talkUrl: string | null;
+  niches: string[];
+}): string {
+  const firstStudent = params.studentName.split(' ')[0] || 'there';
+  const firstMentor = params.mentorName.split(' ')[0] || params.mentorName;
+  const msg = params.studentMessage.toLowerCase();
+
+  let topicAck = `Thanks for reaching out about ${params.niches[0]?.replace(/-/g, ' ') || 'career exploration'}!`;
+  if (msg.includes('startup') || msg.includes('founder') || msg.includes('business') || msg.includes('entrepreneur')) {
+    topicAck = `Love the entrepreneurial curiosity you shared in your note!`;
+  } else if (msg.includes('psych') || msg.includes('mental') || msg.includes('counsel') || msg.includes('research')) {
+    topicAck = `Really glad to hear you are exploring psychology and human behavior thoughtfully.`;
+  } else if (msg.includes('impact') || msg.includes('ngo') || msg.includes('social') || msg.includes('climate') || msg.includes('community')) {
+    topicAck = `It is wonderful to see high-school students caring deeply about social impact in Pakistan.`;
+  } else if (msg.includes('uni') || msg.includes('degree') || msg.includes('a-level') || msg.includes('fsc') || msg.includes('lums') || msg.includes('nust') || msg.includes('iba')) {
+    topicAck = `Choosing your degree and university is a big milestone—you are asking the right questions early.`;
+  } else if (msg.includes('session') || msg.includes('1:1') || msg.includes('call') || msg.includes('meet')) {
+    topicAck = `I would be happy to jump on a 1:1 mentoring call with you.`;
+  }
+
+  const snippet = params.studentMessage.trim()
+    ? ` I read your note ("${params.studentMessage.trim().slice(0, 72)}${params.studentMessage.trim().length > 72 ? '...' : ''}") and accepted your request.`
+    : ` I accepted your connection request.`;
+
+  const roleLine = `As ${params.profession}${params.company ? ` at ${params.company}` : ''}, feel free to drop your specific questions here or grab one of my open 1:1 PKT time slots on my profile.`;
+  const talkLine = params.talkUrl ? ` You can also check out my featured talk while we schedule.` : '';
+
+  return `Assalam-o-Alaikum ${firstStudent}! ${topicAck}${snippet} ${roleLine}${talkLine} — ${firstMentor}`;
+}
 
 const isServerlessRuntime = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 
@@ -65,20 +162,71 @@ const upload = multer({
   limits: { fileSize: isServerlessRuntime ? 1.5 * 1024 * 1024 : 3 * 1024 * 1024 },
 });
 
+let cachedFirebaseApiKey: string | null | undefined;
+
+function loadFirebaseWebApiKey(): string | null {
+  const envKey = process.env.FIREBASE_WEB_API_KEY?.trim();
+  if (envKey) return envKey;
+  if (cachedFirebaseApiKey !== undefined) return cachedFirebaseApiKey;
+  try {
+    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { apiKey?: string };
+      cachedFirebaseApiKey = parsed.apiKey?.trim() || null;
+      return cachedFirebaseApiKey;
+    }
+  } catch {
+    // ignore missing config
+  }
+  cachedFirebaseApiKey = null;
+  return null;
+}
+
 function getAppBaseUrl(req: express.Request): string {
+  const publicUrl = process.env.PUBLIC_APP_URL?.trim();
+  if (publicUrl) {
+    return publicUrl.replace(/\/+$/, '');
+  }
+
+  const forwardedHost = ((req.headers['x-forwarded-host'] as string) || '').split(',')[0].trim();
+  const rawHost = forwardedHost || req.headers.host || process.env.VERCEL_URL || 'localhost:3000';
+  const host = rawHost.split(',')[0].trim();
+  const protoHeader = (req.headers['x-forwarded-proto'] as string) || req.protocol || (isServerlessRuntime ? 'https' : 'http');
+  const proto = protoHeader.split(',')[0].trim();
+
+  // On Vercel (preview or production), always derive callback URL from the active deployment host
+  if (isServerlessRuntime && host) {
+    return `${proto}://${host}`;
+  }
+
   const envUrl = process.env.APP_URL?.trim();
   if (envUrl && envUrl !== 'MY_APP_URL') {
-    return envUrl.replace(/\/+$/, '');
+    const isLocalEnv = envUrl.startsWith('http://localhost');
+    if (!isLocalEnv || !forwardedHost || forwardedHost.startsWith('localhost')) {
+      return envUrl.replace(/\/+$/, '');
+    }
   }
-  const protoHeader = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
-  const proto = protoHeader.split(',')[0].trim();
-  const hostHeader =
-    (req.headers['x-forwarded-host'] as string) ||
-    req.headers.host ||
-    process.env.VERCEL_URL ||
-    'localhost:3000';
-  const host = hostHeader.split(',')[0].trim();
+
   return `${proto}://${host}`;
+}
+
+function isTrustedReturnOrigin(origin: string | undefined, req: express.Request): origin is string {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const baseOrigin = new URL(getAppBaseUrl(req)).origin;
+    if (parsed.origin === baseOrigin) return true;
+    if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') return true;
+    const reqHost = (((req.headers['x-forwarded-host'] as string) || req.headers.host || '').split(',')[0].trim()).split(':')[0];
+    if (parsed.protocol === 'https:') {
+      if (parsed.hostname.endsWith('.run.app') || parsed.hostname.endsWith('.vercel.app')) return true;
+      if (reqHost && parsed.hostname === reqHost) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function parseJsonArray<T = string>(raw: unknown): T[] {
@@ -104,11 +252,50 @@ function hydrateProfile(row: Record<string, unknown> | undefined) {
   };
 }
 
+const MENTOR_MONTHLY_CONNECTION_LIMIT = 30;
+
+const VIP_PARTNER_CODES: Record<string, string> = {
+  'NIC-VIP-2026': 'NIC Pakistan',
+  'PLAN9-VIP-2026': 'Plan9 PITB',
+  'NESTIO-VIP-2026': 'The Nest I/O',
+  'ORIC-VIP-2026': 'ORIC University Network',
+  'SV-PARTNER-2026': 'Silicon Valley Partner Network',
+};
+
+function toPktMonth(isoStr: string): string {
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const pkt = new Date(d.getTime() + 5 * 3600 * 1000);
+  return `${pkt.getUTCFullYear()}-${String(pkt.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 function hydrateMentor(row: Record<string, unknown> | undefined) {
   if (!row) return null;
   return {
     ...row,
     niches: parseJsonArray<string>(row.niches),
+    topics: parseJsonArray<string>(row.topics),
+    preferred_slots: parseJsonArray<string>(row.preferred_slots),
+    is_demo: row.is_demo !== undefined ? Boolean(row.is_demo) : false,
+    linkedin_verified: row.linkedin_verified !== undefined ? Boolean(row.linkedin_verified) : undefined,
+  };
+}
+
+function hydrateProfessionalProfile(row: Record<string, unknown> | undefined) {
+  if (!row) return null;
+  return {
+    profile_id: String(row.profile_id),
+    linkedin_sub: row.linkedin_sub ? String(row.linkedin_sub) : null,
+    linkedin_email: row.linkedin_email ? String(row.linkedin_email) : null,
+    linkedin_verified: Boolean(row.linkedin_verified),
+    linkedin_profile_url: row.linkedin_profile_url ? String(row.linkedin_profile_url) : null,
+    headline: row.headline ? String(row.headline) : null,
+    current_role: row.current_role ? String(row.current_role) : null,
+    organization: row.organization ? String(row.organization) : null,
+    industry: row.industry ? String(row.industry) : null,
+    locale: row.locale ? String(row.locale) : null,
+    synced_at: String(row.synced_at || ''),
+    updated_at: String(row.updated_at || ''),
   };
 }
 
@@ -118,6 +305,7 @@ function hydrateNiche(row: Record<string, unknown>) {
     degrees: parseJsonArray<string>(row.degrees),
     universities: parseJsonArray<string>(row.universities),
     riasec_codes: parseJsonArray<string>(row.riasec_codes),
+    is_active_track: isActiveTrackSlug(String(row.slug || '')),
   };
 }
 
@@ -441,11 +629,210 @@ export function createApiRouter() {
     res.json({ ok: true, token, profile: hydrateProfile(profile) });
   });
 
+  function upsertProfessionalProfileRecord(params: {
+    profileId: string;
+    linkedinSub?: string | null;
+    linkedinEmail?: string | null;
+    linkedinVerified?: boolean;
+    linkedinProfileUrl?: string | null;
+    headline?: string | null;
+    currentRole?: string | null;
+    organization?: string | null;
+    industry?: string | null;
+    locale?: string | null;
+    rawOidcProfile?: Record<string, unknown> | null;
+  }) {
+    const nowIso = new Date().toISOString();
+    const existing = db
+      .prepare(`SELECT * FROM professional_profiles WHERE profile_id = ?`)
+      .get(params.profileId) as Record<string, unknown> | undefined;
+
+    const rawJson = params.rawOidcProfile
+      ? JSON.stringify(params.rawOidcProfile)
+      : existing
+        ? String(existing.raw_oidc_profile || '{}')
+        : '{}';
+
+    if (!existing) {
+      db.prepare(
+        `INSERT INTO professional_profiles (
+           profile_id, linkedin_sub, linkedin_email, linkedin_verified, linkedin_profile_url,
+           headline, current_role, organization, industry, locale, raw_oidc_profile, synced_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        params.profileId,
+        params.linkedinSub || null,
+        params.linkedinEmail || null,
+        params.linkedinVerified ? 1 : 0,
+        params.linkedinProfileUrl || null,
+        params.headline || null,
+        params.currentRole || null,
+        params.organization || null,
+        params.industry || null,
+        params.locale || null,
+        rawJson,
+        nowIso,
+        nowIso
+      );
+      return;
+    }
+
+    db.prepare(
+      `UPDATE professional_profiles
+       SET linkedin_sub = COALESCE(?, linkedin_sub),
+           linkedin_email = COALESCE(?, linkedin_email),
+           linkedin_verified = CASE WHEN ? = 1 THEN 1 ELSE linkedin_verified END,
+           linkedin_profile_url = COALESCE(?, linkedin_profile_url),
+           headline = COALESCE(?, headline),
+           current_role = COALESCE(?, current_role),
+           organization = COALESCE(?, organization),
+           industry = COALESCE(?, industry),
+           locale = COALESCE(?, locale),
+           raw_oidc_profile = ?,
+           synced_at = CASE WHEN ? IS NOT NULL THEN ? ELSE synced_at END,
+           updated_at = ?
+       WHERE profile_id = ?`
+    ).run(
+      params.linkedinSub || null,
+      params.linkedinEmail || null,
+      params.linkedinVerified ? 1 : 0,
+      params.linkedinProfileUrl !== undefined ? params.linkedinProfileUrl : null,
+      params.headline !== undefined ? params.headline : null,
+      params.currentRole !== undefined ? params.currentRole : null,
+      params.organization !== undefined ? params.organization : null,
+      params.industry !== undefined ? params.industry : null,
+      params.locale || null,
+      rawJson,
+      params.linkedinSub || null,
+      nowIso,
+      nowIso,
+      params.profileId
+    );
+  }
+
+  // Shared helper for creating/updating a verified OAuth user & issuing Outspace session token
+  function upsertOAuthAccount(
+    req: express.Request,
+    res: express.Response,
+    params: {
+      email: string;
+      fullName: string;
+      avatarUrl: string | null;
+      provider: 'google' | 'linkedin';
+      providerId: string;
+      requestedRole: 'student' | 'mentor';
+      linkedinClaims?: {
+        locale?: string | null;
+        rawProfile?: Record<string, unknown>;
+      };
+    }
+  ) {
+    let existing = (
+      params.providerId
+        ? db
+            .prepare(`SELECT id, provider_id FROM auth_users WHERE auth_provider = ? AND provider_id = ?`)
+            .get(params.provider, params.providerId)
+        : undefined
+    ) as { id: string; provider_id: string | null } | undefined;
+
+    if (!existing) {
+      existing = db.prepare(`SELECT id, provider_id FROM auth_users WHERE email = ?`).get(params.email) as
+        | { id: string; provider_id: string | null }
+        | undefined;
+    }
+
+    const userId = existing?.id || uuid();
+    const nowIso = new Date().toISOString();
+    let resolvedRole: string = params.requestedRole;
+
+    if (!existing) {
+      const role = params.requestedRole;
+      const placeholderHash = `OAUTH_ONLY_${crypto.randomBytes(24).toString('hex')}`;
+      const tx = db.transaction(() => {
+        db.prepare(
+          `INSERT INTO auth_users (id, email, password_hash, email_verified, auth_provider, provider_id, created_at)
+           VALUES (?, ?, ?, 1, ?, ?, ?)`
+        ).run(userId, params.email, placeholderHash, params.provider, params.providerId, nowIso);
+
+        db.prepare(
+          `INSERT INTO profiles (id, role, full_name, avatar_url, bio, city, grade_level, school_name, interests, guardian_consent, onboarding_complete, created_at)
+           VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, '[]', ?, 0, ?)`
+        ).run(userId, role, params.fullName, params.avatarUrl, role === 'student' ? 1 : 0, nowIso);
+
+        if (role === 'mentor') {
+          db.prepare(
+            `INSERT INTO mentor_details (profile_id, profession, company, years_experience, linkedin_url, niches, status, avg_reply_hours, rating, sessions_completed)
+             VALUES (?, '', NULL, NULL, '', '[]', 'pending', NULL, NULL, 0)`
+          ).run(userId);
+
+          if (params.provider === 'linkedin' && params.providerId) {
+            upsertProfessionalProfileRecord({
+              profileId: userId,
+              linkedinSub: params.providerId,
+              linkedinEmail: params.email,
+              linkedinVerified: true,
+              locale: params.linkedinClaims?.locale || null,
+              rawOidcProfile: params.linkedinClaims?.rawProfile || null,
+            });
+          }
+        } else {
+          // Student flow stays intentionally lightweight: no corporate/LinkedIn tables created
+          const trialEnds = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+          db.prepare(
+            `INSERT INTO subscriptions (id, user_id, plan, trial_ends_at, current_period_end, institution_id, free_sessions_left)
+             VALUES (?, ?, 'trial', ?, NULL, NULL, 1)`
+          ).run(uuid(), userId, trialEnds);
+        }
+      });
+      tx();
+    } else {
+      const existingProfile = db.prepare(`SELECT role FROM profiles WHERE id = ?`).get(userId) as
+        | { role: string }
+        | undefined;
+      resolvedRole = existingProfile?.role || params.requestedRole;
+
+      db.prepare(
+        `UPDATE auth_users
+         SET email_verified = 1,
+             provider_id = COALESCE(NULLIF(provider_id, ''), ?)
+         WHERE id = ?`
+      ).run(params.providerId || null, userId);
+
+      if (params.avatarUrl) {
+        db.prepare(`UPDATE profiles SET avatar_url = COALESCE(avatar_url, ?) WHERE id = ?`).run(
+          params.avatarUrl,
+          userId
+        );
+      }
+
+      if (resolvedRole === 'mentor' && params.provider === 'linkedin' && params.providerId) {
+        upsertProfessionalProfileRecord({
+          profileId: userId,
+          linkedinSub: params.providerId,
+          linkedinEmail: params.email,
+          linkedinVerified: true,
+          locale: params.linkedinClaims?.locale || null,
+          rawOidcProfile: params.linkedinClaims?.rawProfile || null,
+        });
+      }
+    }
+
+    scheduleMongoSync(db);
+    const token = signUserId(userId);
+    setSessionCookie(req, res, token);
+
+    const profileRow = db.prepare(`SELECT * FROM profiles WHERE id = ?`).get(userId) as Record<string, unknown>;
+    return { token, profileRow };
+  }
+
   // GOOGLE (GMAIL) & LINKEDIN OAUTH LOGIN FOR STUDENTS AND MENTORS
   router.get('/auth/oauth/providers', (req, res) => {
     const baseUrl = getAppBaseUrl(req);
+    const hasFirebaseGoogle = Boolean(loadFirebaseWebApiKey());
+    const hasGoogleOAuth = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
     res.json({
-      google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+      google: hasFirebaseGoogle || hasGoogleOAuth,
+      googleFirebase: hasFirebaseGoogle,
       linkedin: Boolean(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET),
       callbacks: {
         google: `${baseUrl}/api/auth/oauth/google/callback`,
@@ -454,9 +841,112 @@ export function createApiRouter() {
     });
   });
 
-  router.get('/auth/oauth/:provider/url', (req, res) => {
+  // Verify Firebase Auth Google ID token (works on AI Studio, Vercel, and Mobile without redirect_uri mismatch)
+  router.post('/auth/oauth/google/firebase', async (req, res) => {
+    const { idToken, accessToken, role } = req.body || {};
+    const requestedRole: 'student' | 'mentor' = role === 'mentor' ? 'mentor' : 'student';
+
+    if (!idToken || typeof idToken !== 'string') {
+      res.status(400).json({ error: 'Missing Google sign-in token.' });
+      return;
+    }
+
+    const firebaseApiKey = loadFirebaseWebApiKey();
+    if (!firebaseApiKey) {
+      res.status(500).json({ error: 'Firebase Google sign-in is not configured on this server.' });
+      return;
+    }
+
+    try {
+      const lookupRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseApiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        }
+      );
+
+      const lookupData = (await lookupRes.json()) as {
+        users?: Array<{
+          localId?: string;
+          email?: string;
+          emailVerified?: boolean;
+          displayName?: string;
+          photoUrl?: string;
+          providerUserInfo?: Array<{ providerId?: string; rawId?: string }>;
+        }>;
+        error?: { message?: string };
+      };
+
+      const fbUser = lookupData.users?.[0];
+      if (!lookupRes.ok || !fbUser?.email) {
+        res.status(401).json({
+          error: lookupData.error?.message || 'Could not verify Google account token.',
+        });
+        return;
+      }
+
+      let emailVerified = Boolean(fbUser.emailVerified);
+      let fullName = fbUser.displayName?.trim() || fbUser.email.split('@')[0];
+      let avatarUrl: string | null = fbUser.photoUrl || null;
+
+      if (!emailVerified && typeof accessToken === 'string' && accessToken) {
+        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (userInfoRes.ok) {
+          const gUser = (await userInfoRes.json()) as {
+            email?: string;
+            email_verified?: boolean;
+            name?: string;
+            picture?: string;
+          };
+          if (gUser.email?.toLowerCase() === fbUser.email.toLowerCase() && gUser.email_verified) {
+            emailVerified = true;
+            if (!fbUser.displayName && gUser.name) fullName = gUser.name.trim();
+            if (!avatarUrl && gUser.picture) avatarUrl = gUser.picture;
+          }
+        }
+      }
+
+      if (!emailVerified) {
+        res.status(403).json({ error: 'Your Google email address must be verified before signing in.' });
+        return;
+      }
+
+      const googleProviderInfo = fbUser.providerUserInfo?.find((p) => p.providerId === 'google.com');
+      const { token, profileRow } = upsertOAuthAccount(req, res, {
+        email: fbUser.email.trim().toLowerCase(),
+        fullName,
+        avatarUrl,
+        provider: 'google',
+        providerId: googleProviderInfo?.rawId || fbUser.localId || '',
+        requestedRole,
+      });
+
+      res.json({ ok: true, token, profile: hydrateProfile(profileRow) });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message || 'Google authentication verification failed.' });
+    }
+  });
+
+  router.get('/auth/oauth/:provider/url', (req: AuthenticatedRequest, res) => {
     const provider = req.params.provider;
     const role = req.query.role === 'mentor' ? 'mentor' : 'student';
+    const mode = req.query.mode === 'redirect' ? 'redirect' : 'popup';
+    const rawOrigin = typeof req.query.return_origin === 'string' ? req.query.return_origin : undefined;
+    const returnOrigin = isTrustedReturnOrigin(rawOrigin, req) ? rawOrigin : getAppBaseUrl(req);
+    const allowedReturnPaths = ['/login', '/signup', '/settings', '/onboarding'];
+    const rawReturnPath = typeof req.query.return_path === 'string' ? req.query.return_path : '/login';
+    const returnPath = allowedReturnPaths.includes(rawReturnPath) ? rawReturnPath : '/login';
+    const wantsLink = req.query.intent === 'link';
+
+    if (wantsLink && !req.userId) {
+      res.status(401).json({ error: 'Please log in before linking your LinkedIn account.' });
+      return;
+    }
+
     if (provider !== 'google' && provider !== 'linkedin') {
       res.status(400).json({ error: 'Unsupported OAuth provider.' });
       return;
@@ -485,7 +975,7 @@ export function createApiRouter() {
         scope: 'openid email profile',
         access_type: 'online',
         prompt: 'select_account',
-        state: signOAuthState({ provider: 'google', role }),
+        state: signOAuthState({ provider: 'google', role, mode, returnOrigin, returnPath }),
       });
 
       res.json({
@@ -514,7 +1004,14 @@ export function createApiRouter() {
       client_id: liClientId,
       redirect_uri: redirectUri,
       scope: 'openid profile email',
-      state: signOAuthState({ provider: 'linkedin', role }),
+      state: signOAuthState({
+        provider: 'linkedin',
+        role: wantsLink && req.userRole === 'mentor' ? 'mentor' : role,
+        mode,
+        returnOrigin,
+        returnPath,
+        linkUserId: wantsLink ? req.userId : undefined,
+      }),
     });
 
     res.json({
@@ -530,40 +1027,84 @@ export function createApiRouter() {
     const state = typeof req.query.state === 'string' ? req.query.state : '';
     const oauthError = typeof req.query.error === 'string' ? req.query.error : '';
 
-    const sendPopupResult = (payload: Record<string, unknown>) => {
+    const parsedState = verifyOAuthState(state);
+    const baseUrl = getAppBaseUrl(req);
+    const targetOrigin = isTrustedReturnOrigin(parsedState?.returnOrigin, req)
+      ? parsedState!.returnOrigin!
+      : baseUrl;
+    const targetPath = parsedState?.returnPath || '/login';
+    const flowMode = parsedState?.mode || 'popup';
+
+    const sendOAuthResult = (payload: Record<string, unknown>) => {
+      let redirectTarget = `${targetOrigin}${targetPath}`;
+      if (payload.type === 'OUTSPACE_OAUTH_SUCCESS' && typeof payload.token === 'string') {
+        const hashParams = new URLSearchParams({
+          oauth_token: payload.token,
+          role: String(payload.role || 'student'),
+          onboarding: payload.onboarding_complete ? '1' : '0',
+        });
+        if (payload.linked) {
+          hashParams.set('linkedin_synced', '1');
+        }
+        redirectTarget = `${targetOrigin}${targetPath}#${hashParams.toString()}`;
+      } else if (payload.type === 'OUTSPACE_OAUTH_ERROR') {
+        const hashParams = new URLSearchParams({
+          oauth_error: String(payload.error || 'Authentication failed.'),
+        });
+        redirectTarget = `${targetOrigin}${targetPath}#${hashParams.toString()}`;
+      }
+
+      if (flowMode === 'redirect') {
+        res.redirect(302, redirectTarget);
+        return;
+      }
+
       const json = JSON.stringify(payload);
+      const redirectJson = JSON.stringify(redirectTarget);
       res.setHeader('Content-Type', 'text/html');
       res.send(`<!doctype html>
 <html>
-  <body style="font-family:sans-serif;background:#FFF5E8;color:#252020;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;">
-    <div style="text-align:center;padding:24px;border:2px solid #252020;border-radius:16px;background:#fff;">
-      <p style="font-weight:bold;margin:0 0 8px;">Outspace Authentication</p>
-      <p style="font-size:13px;margin:0;color:#5A4F4F;">Completing sign-in, this window will close automatically...</p>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Outpase Sign-In</title>
+  </head>
+  <body style="font-family:sans-serif;background:#FFF5E8;color:#252020;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;">
+    <div style="text-align:center;padding:24px;border:2px solid #252020;border-radius:18px;background:#fff;max-width:360px;width:100%;">
+      <p style="font-weight:bold;margin:0 0 8px;font-size:16px;">Outpase Authentication</p>
+      <p style="font-size:13px;margin:0 0 16px;color:#5A4F4F;">Completing sign-in, returning to Outpase...</p>
+      <a id="continue-link" href="${redirectTarget.replace(/"/g, '&quot;')}" style="display:inline-block;padding:10px 18px;border-radius:12px;background:#C83D42;color:#fff;font-weight:bold;font-size:13px;text-decoration:none;border:2px solid #252020;">Continue to Outpase &rarr;</a>
     </div>
     <script>
-      if (window.opener) {
-        window.opener.postMessage(${json}, '*');
-        window.close();
-      } else {
-        window.location.href = '/';
-      }
+      (function () {
+        var payload = ${json};
+        var fallbackUrl = ${redirectJson};
+        if (window.opener && !window.opener.closed) {
+          try {
+            window.opener.postMessage(payload, '*');
+            window.close();
+          } catch (e) {}
+          setTimeout(function () {
+            window.location.replace(fallbackUrl);
+          }, 700);
+        } else {
+          window.location.replace(fallbackUrl);
+        }
+      })();
     </script>
   </body>
 </html>`);
     };
 
     if (oauthError) {
-      sendPopupResult({ type: 'OUTSPACE_OAUTH_ERROR', error: `Authentication cancelled (${oauthError}).` });
+      sendOAuthResult({ type: 'OUTSPACE_OAUTH_ERROR', error: `Authentication cancelled (${oauthError}).` });
       return;
     }
 
-    const parsedState = verifyOAuthState(state);
     if (!parsedState || parsedState.provider !== provider || !code) {
-      sendPopupResult({ type: 'OUTSPACE_OAUTH_ERROR', error: 'Invalid or expired OAuth session state.' });
+      sendOAuthResult({ type: 'OUTSPACE_OAUTH_ERROR', error: 'Invalid or expired OAuth session state.' });
       return;
     }
 
-    const baseUrl = getAppBaseUrl(req);
     const redirectUri = `${baseUrl}/api/auth/oauth/${provider}/callback`;
 
     try {
@@ -571,6 +1112,7 @@ export function createApiRouter() {
       let fullName = '';
       let avatarUrl: string | null = null;
       let providerId = '';
+      let linkedinClaims: { locale?: string | null; rawProfile?: Record<string, unknown> } | undefined;
 
       if (provider === 'google') {
         const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -629,77 +1171,112 @@ export function createApiRouter() {
         const profileData = (await userRes.json()) as {
           sub?: string;
           email?: string;
+          email_verified?: boolean;
           name?: string;
+          given_name?: string;
+          family_name?: string;
           picture?: string;
+          locale?: string | { country?: string; language?: string };
         };
         if (!profileData.email) {
           throw new Error('LinkedIn account did not share an email address.');
         }
         email = profileData.email.trim().toLowerCase();
-        fullName = profileData.name?.trim() || email.split('@')[0];
+        const combinedName = [profileData.given_name, profileData.family_name].filter(Boolean).join(' ').trim();
+        fullName = profileData.name?.trim() || combinedName || email.split('@')[0];
         avatarUrl = profileData.picture || null;
         providerId = profileData.sub || '';
+
+        const localeStr =
+          typeof profileData.locale === 'string'
+            ? profileData.locale
+            : profileData.locale && (profileData.locale.language || profileData.locale.country)
+              ? [profileData.locale.language, profileData.locale.country].filter(Boolean).join('-')
+              : null;
+
+        linkedinClaims = {
+          locale: localeStr,
+          rawProfile: {
+            sub: profileData.sub,
+            name: fullName,
+            given_name: profileData.given_name,
+            family_name: profileData.family_name,
+            email,
+            email_verified: profileData.email_verified,
+            picture: avatarUrl,
+            locale: localeStr,
+          },
+        };
       }
 
-      const existing = db.prepare(`SELECT id FROM auth_users WHERE email = ?`).get(email) as
-        | { id: string }
-        | undefined;
-
-      let userId = existing?.id || uuid();
-      const nowIso = new Date().toISOString();
-
-      if (!existing) {
-        const role = parsedState.role;
-        const placeholderHash = `OAUTH_ONLY_${crypto.randomBytes(24).toString('hex')}`;
-        const tx = db.transaction(() => {
-          db.prepare(
-            `INSERT INTO auth_users (id, email, password_hash, email_verified, auth_provider, provider_id, created_at)
-             VALUES (?, ?, ?, 1, ?, ?, ?)`
-          ).run(userId, email, placeholderHash, provider, providerId, nowIso);
-
-          db.prepare(
-            `INSERT INTO profiles (id, role, full_name, avatar_url, bio, city, grade_level, school_name, interests, guardian_consent, onboarding_complete, created_at)
-             VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, '[]', ?, 0, ?)`
-          ).run(userId, role, fullName, avatarUrl, role === 'student' ? 1 : 0, nowIso);
-
-          if (role === 'mentor') {
-            db.prepare(
-              `INSERT INTO mentor_details (profile_id, profession, company, years_experience, linkedin_url, niches, status, avg_reply_hours, rating, sessions_completed)
-               VALUES (?, '', NULL, NULL, '', '[]', 'pending', NULL, NULL, 0)`
-            ).run(userId);
-          } else {
-            const trialEnds = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
-            db.prepare(
-              `INSERT INTO subscriptions (id, user_id, plan, trial_ends_at, current_period_end, institution_id, free_sessions_left)
-               VALUES (?, ?, 'trial', ?, NULL, NULL, 1)`
-            ).run(uuid(), userId, trialEnds);
-          }
-        });
-        tx();
-      } else {
-        db.prepare(`UPDATE auth_users SET email_verified = 1 WHERE id = ?`).run(userId);
-        if (avatarUrl) {
-          db.prepare(`UPDATE profiles SET avatar_url = COALESCE(avatar_url, ?) WHERE id = ?`).run(avatarUrl, userId);
+      // Mentor linking LinkedIn to their existing account from Settings or Onboarding
+      if (parsedState.linkUserId && provider === 'linkedin') {
+        const targetProfile = db
+          .prepare(`SELECT id, role, onboarding_complete FROM profiles WHERE id = ?`)
+          .get(parsedState.linkUserId) as
+          | { id: string; role: string; onboarding_complete: number }
+          | undefined;
+        if (!targetProfile) {
+          throw new Error('Target Outpase profile was not found.');
         }
+
+        if (providerId) {
+          const conflicting = db
+            .prepare(`SELECT profile_id FROM professional_profiles WHERE linkedin_sub = ? AND profile_id != ?`)
+            .get(providerId, targetProfile.id) as { profile_id: string } | undefined;
+          if (conflicting) {
+            throw new Error('This LinkedIn account is already linked to another Outpase mentor profile.');
+          }
+        }
+
+        upsertProfessionalProfileRecord({
+          profileId: targetProfile.id,
+          linkedinSub: providerId || null,
+          linkedinEmail: email,
+          linkedinVerified: true,
+          locale: linkedinClaims?.locale || null,
+          rawOidcProfile: linkedinClaims?.rawProfile || null,
+        });
+
+        if (avatarUrl) {
+          db.prepare(`UPDATE profiles SET avatar_url = COALESCE(avatar_url, ?) WHERE id = ?`).run(
+            avatarUrl,
+            targetProfile.id
+          );
+        }
+
+        scheduleMongoSync(db);
+        const token = signUserId(targetProfile.id);
+        setSessionCookie(req, res, token);
+
+        sendOAuthResult({
+          type: 'OUTSPACE_OAUTH_SUCCESS',
+          token,
+          role: targetProfile.role,
+          onboarding_complete: Boolean(targetProfile.onboarding_complete),
+          linked: true,
+        });
+        return;
       }
 
-      scheduleMongoSync(db);
-      const token = signUserId(userId);
-      setSessionCookie(req, res, token);
+      const { token, profileRow } = upsertOAuthAccount(req, res, {
+        email,
+        fullName,
+        avatarUrl,
+        provider: provider as 'google' | 'linkedin',
+        providerId,
+        requestedRole: parsedState.role,
+        linkedinClaims,
+      });
 
-      const profile = db.prepare(`SELECT role, onboarding_complete FROM profiles WHERE id = ?`).get(userId) as {
-        role: string;
-        onboarding_complete: number;
-      };
-
-      sendPopupResult({
+      sendOAuthResult({
         type: 'OUTSPACE_OAUTH_SUCCESS',
         token,
-        role: profile.role,
-        onboarding_complete: Boolean(profile.onboarding_complete),
+        role: String(profileRow.role || 'student'),
+        onboarding_complete: Boolean(profileRow.onboarding_complete),
       });
     } catch (err) {
-      sendPopupResult({
+      sendOAuthResult({
         type: 'OUTSPACE_OAUTH_ERROR',
         error: (err as Error).message || 'OAuth authentication failed.',
       });
@@ -731,7 +1308,18 @@ export function createApiRouter() {
     const profile = hydrateProfile(profileRow);
     const mentorRow =
       profileRow.role === 'mentor'
-        ? (db.prepare(`SELECT * FROM mentor_details WHERE profile_id = ?`).get(req.userId) as
+        ? (db
+            .prepare(
+              `SELECT md.*, COALESCE(pp.linkedin_verified, 0) as linkedin_verified
+               FROM mentor_details md
+               LEFT JOIN professional_profiles pp ON pp.profile_id = md.profile_id
+               WHERE md.profile_id = ?`
+            )
+            .get(req.userId) as Record<string, unknown> | undefined)
+        : undefined;
+    const professionalRow =
+      profileRow.role === 'mentor'
+        ? (db.prepare(`SELECT * FROM professional_profiles WHERE profile_id = ?`).get(req.userId) as
             | Record<string, unknown>
             | undefined)
         : undefined;
@@ -753,6 +1341,7 @@ export function createApiRouter() {
         email_verified: Boolean(authUser?.email_verified),
         auth_provider: authUser?.auth_provider || 'local',
         mentor_details: hydrateMentor(mentorRow),
+        professional_profile: hydrateProfessionalProfile(professionalRow),
         subscription,
         pending_requests_count: unreadMessagesCount,
       },
@@ -798,16 +1387,84 @@ export function createApiRouter() {
     }
 
     if (profile.role === 'mentor') {
-      const { profession, company, years_experience, linkedin_url, niches, bio, city } = req.body || {};
+      const {
+        profession,
+        company,
+        years_experience,
+        linkedin_url,
+        niches,
+        topics,
+        preferred_slots,
+        auto_welcome_message,
+        vip_code,
+        bio,
+        city,
+        headline,
+        industry,
+      } = req.body || {};
+
       if (!profession || !linkedin_url || !bio || !city) {
-        res.status(400).json({ error: 'Profession, LinkedIn URL, city, and bio are required.' });
+        res.status(400).json({ error: 'Experience role, LinkedIn URL, city, and bio are required.' });
         return;
       }
-      const cleanNiches = Array.isArray(niches) ? niches : [];
+      if (String(bio).trim().length < 20) {
+        res.status(400).json({ error: 'Please write a short bio (at least 20 characters) describing your background.' });
+        return;
+      }
+      if (!/^https?:\/\/.*linkedin\.com/i.test(String(linkedin_url).trim())) {
+        res.status(400).json({ error: 'Please enter a valid LinkedIn profile URL (linkedin.com/in/...).' });
+        return;
+      }
+      const cleanNiches = Array.isArray(niches) ? niches.filter(Boolean) : [];
       if (cleanNiches.length === 0) {
-        res.status(400).json({ error: 'Please select at least one career niche you can mentor.' });
+        res.status(400).json({ error: 'Please select one or more fields of expertise.' });
         return;
       }
+      const cleanTopics = Array.isArray(topics)
+        ? topics.map((t) => String(t).trim()).filter(Boolean)
+        : [];
+      if (cleanTopics.length === 0) {
+        res.status(400).json({ error: 'Please list at least one specific topic you can mentor or teach best.' });
+        return;
+      }
+      const cleanPreferredSlots = Array.isArray(preferred_slots)
+        ? preferred_slots.map((s) => String(s).trim()).filter(Boolean)
+        : [];
+      if (cleanPreferredSlots.length === 0) {
+        res.status(400).json({ error: 'Please choose your preferred weekly slot timings.' });
+        return;
+      }
+
+      const rawVip = typeof vip_code === 'string' ? vip_code.trim().toUpperCase() : '';
+      let matchedPartner: string | null = null;
+      if (rawVip) {
+        matchedPartner = VIP_PARTNER_CODES[rawVip] || null;
+        if (!matchedPartner) {
+          res.status(400).json({
+            error:
+              'That VIP code is not recognized. Only invited mentors from NIC, Plan9, Nest I/O, ORIC, or our Silicon Valley partner network have VIP codes — leave it blank to apply via standard 48-hour verification.',
+          });
+          return;
+        }
+      }
+
+      const cleanProf = String(profession).trim();
+      const cleanComp = company ? String(company).trim() : null;
+      const cleanLinkedin = String(linkedin_url).trim();
+      const cleanWelcome = auto_welcome_message && String(auto_welcome_message).trim()
+        ? String(auto_welcome_message).trim()
+        : null;
+      const derivedHeadline =
+        headline && String(headline).trim()
+          ? String(headline).trim()
+          : cleanComp
+            ? `${cleanProf} at ${cleanComp}`
+            : cleanProf;
+
+      const nowMs = Date.now();
+      const submittedAt = new Date(nowMs).toISOString();
+      const deadlineAt = new Date(nowMs + 48 * 3600 * 1000).toISOString();
+      const nextStatus = matchedPartner ? 'approved' : 'pending';
 
       const tx = db.transaction(() => {
         db.prepare(
@@ -815,19 +1472,75 @@ export function createApiRouter() {
         ).run(String(city).trim(), String(bio).trim(), JSON.stringify(cleanNiches), req.userId!);
 
         db.prepare(
-          `UPDATE mentor_details SET profession = ?, company = ?, years_experience = ?, linkedin_url = ?, niches = ? WHERE profile_id = ?`
+          `UPDATE mentor_details
+           SET profession = ?,
+               company = ?,
+               years_experience = ?,
+               linkedin_url = ?,
+               niches = ?,
+               topics = ?,
+               preferred_slots = ?,
+               auto_welcome_message = ?,
+               vip_code = ?,
+               vip_partner = ?,
+               verification_submitted_at = ?,
+               verification_deadline_at = ?,
+               status = ?
+           WHERE profile_id = ?`
         ).run(
-          String(profession).trim(),
-          company ? String(company).trim() : null,
+          cleanProf,
+          cleanComp,
           Number(years_experience) || 1,
-          String(linkedin_url).trim(),
+          cleanLinkedin,
           JSON.stringify(cleanNiches),
+          JSON.stringify(cleanTopics),
+          JSON.stringify(cleanPreferredSlots),
+          cleanWelcome,
+          rawVip || null,
+          matchedPartner,
+          submittedAt,
+          matchedPartner ? null : deadlineAt,
+          nextStatus,
           req.userId!
         );
+
+        // If VIP partner verified immediately, seed open PKT availability slots from weekly preferences
+        if (matchedPartner) {
+          const slotCount = (
+            db.prepare(`SELECT COUNT(*) as c FROM availability WHERE mentor_id = ? AND is_booked = 0`).get(req.userId!) as {
+              c: number;
+            }
+          ).c;
+          if (slotCount === 0) {
+            for (const dayOffset of [1, 3, 5]) {
+              const s = new Date(nowMs + dayOffset * 24 * 3600 * 1000);
+              s.setUTCHours(14, 0, 0, 0); // 7 PM PKT
+              const e = new Date(s.getTime() + 45 * 60 * 1000);
+              db.prepare(
+                `INSERT INTO availability (id, mentor_id, start_at, end_at, is_booked) VALUES (?, ?, ?, ?, 0)`
+              ).run(uuid(), req.userId!, s.toISOString(), e.toISOString());
+            }
+          }
+        }
+
+        upsertProfessionalProfileRecord({
+          profileId: req.userId!,
+          linkedinProfileUrl: cleanLinkedin,
+          headline: derivedHeadline,
+          currentRole: cleanProf,
+          organization: cleanComp,
+          industry: industry ? String(industry).trim() : null,
+        });
       });
       tx();
 
-      res.json({ ok: true, next: '/dashboard' });
+      res.json({
+        ok: true,
+        next: '/dashboard',
+        verification_status: nextStatus,
+        vip_partner: matchedPartner,
+        verification_deadline_at: matchedPartner ? null : deadlineAt,
+      });
       return;
     }
 
@@ -837,8 +1550,23 @@ export function createApiRouter() {
 
   // SETTINGS & AVATAR UPLOAD
   router.patch('/settings/profile', requireAuth, (req: AuthenticatedRequest, res) => {
-    const { full_name, bio, city, grade_level, school_name, interests, profession, company, years_experience, linkedin_url } =
-      req.body || {};
+    const {
+      full_name,
+      bio,
+      city,
+      grade_level,
+      school_name,
+      interests,
+      profession,
+      company,
+      years_experience,
+      linkedin_url,
+      headline,
+      industry,
+      topics,
+      preferred_slots,
+      auto_welcome_message,
+    } = req.body || {};
 
     const current = db.prepare(`SELECT role FROM profiles WHERE id = ?`).get(req.userId!) as { role: string };
 
@@ -863,22 +1591,54 @@ export function createApiRouter() {
       );
 
       if (current.role === 'mentor') {
+        const cleanProf = profession ? String(profession).trim() : null;
+        const cleanComp = company !== undefined ? (company ? String(company).trim() : null) : undefined;
+        const cleanLinkedin = linkedin_url ? String(linkedin_url).trim() : null;
+        const cleanTopics = Array.isArray(topics)
+          ? JSON.stringify(topics.map((t) => String(t).trim()).filter(Boolean))
+          : null;
+        const cleanSlots = Array.isArray(preferred_slots)
+          ? JSON.stringify(preferred_slots.map((s) => String(s).trim()).filter(Boolean))
+          : null;
+        const cleanWelcome =
+          auto_welcome_message !== undefined
+            ? auto_welcome_message && String(auto_welcome_message).trim()
+              ? String(auto_welcome_message).trim()
+              : ''
+            : null;
+
         db.prepare(
           `UPDATE mentor_details
            SET profession = COALESCE(?, profession),
                company = COALESCE(?, company),
                years_experience = COALESCE(?, years_experience),
                linkedin_url = COALESCE(?, linkedin_url),
-               niches = COALESCE(?, niches)
+               niches = COALESCE(?, niches),
+               topics = COALESCE(?, topics),
+               preferred_slots = COALESCE(?, preferred_slots),
+               auto_welcome_message = CASE WHEN ? IS NOT NULL THEN NULLIF(?, '') ELSE auto_welcome_message END
            WHERE profile_id = ?`
         ).run(
-          profession ? String(profession).trim() : null,
-          company !== undefined ? company : null,
+          cleanProf,
+          cleanComp !== undefined ? cleanComp : null,
           years_experience !== undefined ? Number(years_experience) : null,
-          linkedin_url ? String(linkedin_url).trim() : null,
+          cleanLinkedin,
           Array.isArray(interests) ? JSON.stringify(interests) : null,
+          cleanTopics,
+          cleanSlots,
+          cleanWelcome,
+          cleanWelcome,
           req.userId!
         );
+
+        upsertProfessionalProfileRecord({
+          profileId: req.userId!,
+          linkedinProfileUrl: cleanLinkedin || undefined,
+          headline: headline !== undefined ? (headline ? String(headline).trim() : null) : undefined,
+          currentRole: cleanProf || undefined,
+          organization: cleanComp,
+          industry: industry !== undefined ? (industry ? String(industry).trim() : null) : undefined,
+        });
       }
     });
     tx();
@@ -958,12 +1718,268 @@ export function createApiRouter() {
       )
       .all(slug);
 
+    const courses = db
+      .prepare(
+        `SELECT c.*, p.full_name as author_name,
+                (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id) as module_count
+         FROM courses c
+         LEFT JOIN profiles p ON p.id = c.author_id
+         WHERE c.niche_slug = ?
+         ORDER BY c.is_coming_soon ASC`
+      )
+      .all(slug);
+
     res.json({
       niche: hydrateNiche(nicheRow),
       mentors,
       groups,
       quizzes,
+      courses,
     });
+  });
+
+  // Helper: Mentor monthly accepted student count (cap 30/month)
+  function getMentorMonthlyConnectionsUsed(mentorId: string): number {
+    const cycleMonth = getCurrentCycleMonth();
+    const rows = db
+      .prepare(
+        `SELECT c.responded_at, c.created_at
+         FROM connections c
+         JOIN profiles p ON p.id = c.requester_id
+         WHERE c.receiver_id = ? AND c.status = 'accepted' AND p.role = 'student'`
+      )
+      .all(mentorId) as Array<{ responded_at: string | null; created_at: string }>;
+    return rows.filter((r) => toPktMonth(r.responded_at || r.created_at) === cycleMonth).length;
+  }
+
+  // Helper: Has student completed a course (all modules OR submitted course assignment)
+  function hasStudentUnlockedMessaging(studentId: string): boolean {
+    const assignment = db
+      .prepare(`SELECT 1 FROM course_assignments WHERE student_id = ? LIMIT 1`)
+      .get(studentId);
+    if (assignment) return true;
+
+    const completedCourse = db
+      .prepare(
+        `SELECT c.id
+         FROM courses c
+         WHERE c.is_coming_soon = 0
+           AND (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id) > 0
+           AND (SELECT COUNT(*) FROM course_progress cp WHERE cp.course_id = c.id AND cp.student_id = ?) >= (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id)
+         LIMIT 1`
+      )
+      .get(studentId);
+    return Boolean(completedCourse);
+  }
+
+  // Helper: Compute Top Student Leaderboard & Top 5 / Winner eligibility
+  function buildLeaderboard(nicheSlug?: string) {
+    const students = db
+      .prepare(
+        `SELECT p.id, p.full_name, p.avatar_url, p.city, p.grade_level, p.school_name
+         FROM profiles p
+         WHERE p.role = 'student' AND p.onboarding_complete = 1`
+      )
+      .all() as Array<{
+      id: string;
+      full_name: string;
+      avatar_url: string | null;
+      city: string | null;
+      grade_level: string | null;
+      school_name: string | null;
+    }>;
+
+    const allAssignments = db
+      .prepare(
+        `SELECT ca.*, c.title as course_title, c.niche_slug
+         FROM course_assignments ca
+         JOIN courses c ON c.id = ca.course_id
+         ORDER BY ca.created_at DESC`
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    const allEntries = db
+      .prepare(
+        `SELECT ce.*, c.title as course_title, c.niche_slug
+         FROM competition_entries ce
+         JOIN courses c ON c.id = ce.course_id
+         ORDER BY ce.score DESC, ce.created_at ASC`
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    const entries = students
+      .map((s) => {
+        const studentAssignments = allAssignments.filter(
+          (a) => String(a.student_id) === s.id && (!nicheSlug || String(a.niche_slug) === nicheSlug)
+        );
+        const studentComps = allEntries.filter(
+          (e) => String(e.student_id) === s.id && (!nicheSlug || String(e.niche_slug) === nicheSlug)
+        );
+
+        const completedCoursesRow = db
+          .prepare(
+            `SELECT COUNT(*) as c FROM courses c
+             WHERE c.is_coming_soon = 0
+               AND (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id) > 0
+               AND (SELECT COUNT(*) FROM course_progress cp WHERE cp.course_id = c.id AND cp.student_id = ?) >= (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id)`
+          )
+          .get(s.id) as { c: number };
+
+        const bestCompScore = studentComps.reduce((max, e) => Math.max(max, Number(e.score) || 75), 0);
+        const bestAssignScore = studentAssignments.reduce((max, a) => Math.max(max, Number(a.score) || 80), 0);
+        const totalActivityBonus = Math.min(10, studentAssignments.length * 3 + studentComps.length * 2);
+        const combinedScore =
+          studentAssignments.length === 0 && studentComps.length === 0
+            ? 0
+            : Math.round(Math.max(bestCompScore, bestAssignScore) + (studentAssignments.length > 1 ? totalActivityBonus : 0));
+
+        const topComp = studentComps[0];
+        return {
+          student_id: s.id,
+          student_name: s.full_name,
+          avatar_url: s.avatar_url,
+          city: s.city,
+          grade_level: s.grade_level,
+          school_name: s.school_name,
+          score: combinedScore,
+          courses_completed: Math.max(completedCoursesRow.c, studentAssignments.length),
+          assignments_count: studentAssignments.length,
+          competition_count: studentComps.length,
+          explicit_winner: studentComps.some((e) => e.status === 'winner' || Number(e.rank) === 1),
+          explicit_top5: studentComps.some(
+            (e) => e.status === 'winner' || e.status === 'top_5' || (e.rank !== null && e.rank !== undefined && Number(e.rank) <= 5)
+          ),
+          latest_pitch_title: topComp ? String(topComp.pitch_title) : null,
+          latest_track: topComp ? String(topComp.niche_slug) : studentAssignments[0] ? String(studentAssignments[0].niche_slug) : null,
+          assignments: studentAssignments,
+        };
+      })
+      .filter((row) => row.assignments_count > 0 || row.competition_count > 0)
+      .sort((a, b) => b.score - a.score || b.assignments_count - a.assignments_count);
+
+    return entries.map((entry, idx) => {
+      const rank = idx + 1;
+      const isWinner = rank === 1 || entry.explicit_winner;
+      const isTop5 = rank <= 5 || entry.explicit_top5;
+      return {
+        rank,
+        student_id: entry.student_id,
+        student_name: entry.student_name,
+        avatar_url: entry.avatar_url,
+        city: entry.city,
+        grade_level: entry.grade_level,
+        school_name: entry.school_name,
+        score: entry.score,
+        courses_completed: entry.courses_completed,
+        assignments_count: entry.assignments_count,
+        competition_count: entry.competition_count,
+        is_winner: isWinner,
+        is_top_5: isTop5,
+        latest_pitch_title: entry.latest_pitch_title,
+        latest_track: entry.latest_track,
+        assignments: entry.assignments,
+      };
+    });
+  }
+
+  function isStudentTop5OrWinner(studentId: string): { unlocked: boolean; rank: number | null; is_winner: boolean } {
+    const leaderboard = buildLeaderboard();
+    const found = leaderboard.find((e) => e.student_id === studentId);
+    if (found && (found.is_top_5 || found.is_winner)) {
+      return { unlocked: true, rank: found.rank, is_winner: found.is_winner };
+    }
+    const dbRank = db
+      .prepare(
+        `SELECT rank, status FROM competition_entries
+         WHERE student_id = ? AND (status IN ('winner', 'top_5') OR (rank IS NOT NULL AND rank <= 5))
+         LIMIT 1`
+      )
+      .get(studentId) as { rank: number | null; status: string } | undefined;
+    if (dbRank) {
+      return {
+        unlocked: true,
+        rank: dbRank.rank || 1,
+        is_winner: dbRank.status === 'winner' || dbRank.rank === 1,
+      };
+    }
+    return { unlocked: false, rank: found?.rank || null, is_winner: false };
+  }
+
+  // LEADERBOARD & TOP STUDENT PORTFOLIO INSPECTION
+  router.get('/leaderboard', requireAuth, (req: AuthenticatedRequest, res) => {
+    const nicheSlug = typeof req.query.niche === 'string' && req.query.niche.trim() ? req.query.niche.trim() : undefined;
+    const entries = buildLeaderboard(nicheSlug);
+    res.json({
+      entries,
+      cycle_month: getCurrentCycleMonth(),
+      days_left_in_cycle: getDaysLeftInCycle(),
+    });
+  });
+
+  // MENTOR FOLLOW & UPDATES (Accessible to free/unverified students!)
+  router.post('/mentors/:id/follow', requireAuth, (req: AuthenticatedRequest, res) => {
+    const mentorId = req.params.id;
+    const target = db.prepare(`SELECT role FROM profiles WHERE id = ?`).get(mentorId) as { role: string } | undefined;
+    if (!target || target.role !== 'mentor') {
+      res.status(404).json({ error: 'Mentor not found.' });
+      return;
+    }
+    db.prepare(`INSERT OR IGNORE INTO mentor_follows (mentor_id, student_id, created_at) VALUES (?, ?, ?)`).run(
+      mentorId,
+      req.userId!,
+      new Date().toISOString()
+    );
+    const count = (
+      db.prepare(`SELECT COUNT(*) as c FROM mentor_follows WHERE mentor_id = ?`).get(mentorId) as { c: number }
+    ).c;
+    res.json({ ok: true, is_following: true, followers_count: count });
+  });
+
+  router.delete('/mentors/:id/follow', requireAuth, (req: AuthenticatedRequest, res) => {
+    const mentorId = req.params.id;
+    db.prepare(`DELETE FROM mentor_follows WHERE mentor_id = ? AND student_id = ?`).run(mentorId, req.userId!);
+    const count = (
+      db.prepare(`SELECT COUNT(*) as c FROM mentor_follows WHERE mentor_id = ?`).get(mentorId) as { c: number }
+    ).c;
+    res.json({ ok: true, is_following: false, followers_count: count });
+  });
+
+  router.post('/mentors/updates', requireAuth, (req: AuthenticatedRequest, res) => {
+    if (req.userRole !== 'mentor') {
+      res.status(403).json({ error: 'Only verified mentors can publish mentor updates and masterclasses.' });
+      return;
+    }
+    const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as
+      | { status: string }
+      | undefined;
+    if (!md || md.status !== 'approved') {
+      res.status(403).json({
+        error:
+          'Your mentor verification (within 48 hours) is still in progress. You can browse the Top Student Leaderboard while our team completes review.',
+      });
+      return;
+    }
+
+    const { kind, title, body, media_url, event_at } = req.body || {};
+    if (!['update', 'masterclass', 'cohort'].includes(kind) || !title || !body) {
+      res.status(400).json({ error: 'Update type, title, and message body are required.' });
+      return;
+    }
+    const id = uuid();
+    db.prepare(
+      `INSERT INTO mentor_updates (id, mentor_id, kind, title, body, media_url, event_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      req.userId!,
+      kind,
+      String(title).trim(),
+      String(body).trim(),
+      media_url ? String(media_url).trim() : null,
+      event_at ? String(event_at).trim() : null,
+      new Date().toISOString()
+    );
+    res.status(201).json({ ok: true, id });
   });
 
   // EXPLORE
@@ -995,15 +2011,29 @@ export function createApiRouter() {
 
     const mentors = mentorRows
       .filter((m) => !blockedIds.includes(String(m.id)) && String(m.id) !== req.userId)
-      .map((m) => ({
-        ...hydrateProfile(m),
-        ...hydrateMentor(m),
-      }))
+      .map((m) => {
+        const mentorId = String(m.id);
+        const monthlyUsed = getMentorMonthlyConnectionsUsed(mentorId);
+        const isFollowing = req.userId
+          ? Boolean(
+              db
+                .prepare(`SELECT 1 FROM mentor_follows WHERE mentor_id = ? AND student_id = ?`)
+                .get(mentorId, req.userId)
+            )
+          : false;
+        return {
+          ...hydrateProfile(m),
+          ...hydrateMentor(m),
+          monthly_connections_used: monthlyUsed,
+          monthly_connections_limit: MENTOR_MONTHLY_CONNECTION_LIMIT,
+          is_following: isFollowing,
+        };
+      })
       .filter((m: Record<string, unknown>) => {
         if (niche && !(m.niches as string[]).includes(niche)) return false;
         if (city && String(m.city || '').toLowerCase() !== city.toLowerCase()) return false;
         if (q) {
-          const hay = `${m.full_name} ${m.profession} ${m.company || ''} ${m.bio || ''} ${m.city || ''}`.toLowerCase();
+          const hay = `${m.full_name} ${m.profession} ${m.company || ''} ${m.bio || ''} ${m.city || ''} ${(m.topics as string[]).join(' ')}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
         return true;
@@ -1072,7 +2102,7 @@ export function createApiRouter() {
            JOIN availability a ON a.id = m.slot_id
            JOIN profiles p ON p.id = m.mentor_id
            LEFT JOIN mentor_details md ON md.profile_id = p.id
-           WHERE m.student_id = ? AND m.status = 'booked'
+           WHERE m.student_id = ? AND m.status = 'booked' AND m.type = 'one_on_one'
            ORDER BY a.start_at ASC`
         )
         .all(req.userId!);
@@ -1105,7 +2135,6 @@ export function createApiRouter() {
         })
         .slice(0, 4);
 
-      // Pending requests > 24h check
       const pendingOutgoing = db
         .prepare(
           `SELECT c.*, p.full_name as receiver_name, md.niches as receiver_niches
@@ -1142,6 +2171,79 @@ export function createApiRouter() {
         })
         .filter((r) => r.is_overdue);
 
+      const cycleMonth = getCurrentCycleMonth();
+      const cycleEndsAt = getCycleEndIso();
+      const coursesSummary = db
+        .prepare(
+          `SELECT c.id, c.niche_slug, c.title, c.duration_label, c.is_coming_soon, c.competition_title,
+                  c.competition_brief, c.meetup_venue, c.meetup_date_label,
+                  (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id) as module_count,
+                  (SELECT COUNT(*) FROM course_progress cp WHERE cp.course_id = c.id AND cp.student_id = ?) as completed_count,
+                  (SELECT COUNT(*) FROM competition_entries ce2 WHERE ce2.course_id = c.id AND ce2.cycle_month = ?) as cohort_count,
+                  EXISTS(SELECT 1 FROM competition_entries ce WHERE ce.course_id = c.id AND ce.student_id = ? AND ce.cycle_month = ?) as has_entered_competition,
+                  EXISTS(SELECT 1 FROM course_assignments ca WHERE ca.course_id = c.id AND ca.student_id = ?) as has_submitted_assignment
+           FROM courses c
+           WHERE c.is_coming_soon = 0
+           ORDER BY c.created_at ASC`
+        )
+        .all(req.userId!, cycleMonth, req.userId!, cycleMonth, req.userId!)
+        .map((c: unknown) => {
+          const row = c as Record<string, unknown>;
+          return {
+            ...row,
+            is_coming_soon: Boolean(row.is_coming_soon),
+            has_entered_competition: Boolean(row.has_entered_competition),
+            has_submitted_assignment: Boolean(row.has_submitted_assignment),
+          };
+        });
+
+      const messagingUnlocked = hasStudentUnlockedMessaging(req.userId!);
+      const oneOnOneStatus = isStudentTop5OrWinner(req.userId!);
+
+      const followedUpdates = db
+        .prepare(
+          `SELECT mu.*, p.full_name as mentor_name, p.avatar_url as mentor_avatar, md.profession as mentor_profession, md.company as mentor_company
+           FROM mentor_updates mu
+           JOIN mentor_follows mf ON mf.mentor_id = mu.mentor_id
+           JOIN profiles p ON p.id = mu.mentor_id
+           LEFT JOIN mentor_details md ON md.profile_id = p.id
+           WHERE mf.student_id = ?
+           ORDER BY mu.created_at DESC
+           LIMIT 8`
+        )
+        .all(req.userId!);
+
+      const upcomingGroupQAs = db
+        .prepare(
+          `SELECT m.id, m.topic, m.meet_url, m.group_id, g.name as group_name,
+                  a.start_at, a.end_at, p.id as mentor_id, p.full_name as mentor_name, md.profession as mentor_profession,
+                  (SELECT COUNT(*) FROM group_seminar_rsvps r WHERE r.meeting_id = m.id) as rsvp_count,
+                  EXISTS(SELECT 1 FROM group_seminar_rsvps r2 WHERE r2.meeting_id = m.id AND r2.student_id = ?) as has_rsvped
+           FROM meetings m
+           LEFT JOIN availability a ON a.id = m.slot_id
+           LEFT JOIN groups g ON g.id = m.group_id
+           JOIN profiles p ON p.id = m.mentor_id
+           LEFT JOIN mentor_details md ON md.profile_id = p.id
+           WHERE m.type = 'group_seminar' AND m.status = 'booked'
+           ORDER BY COALESCE(a.start_at, m.created_at) ASC
+           LIMIT 6`
+        )
+        .all(req.userId!)
+        .map((row: unknown) => {
+          const r = row as Record<string, unknown>;
+          return { ...r, has_rsvped: Boolean(r.has_rsvped) };
+        });
+
+      const myAssignments = db
+        .prepare(
+          `SELECT ca.*, c.title as course_title, c.niche_slug
+           FROM course_assignments ca
+           JOIN courses c ON c.id = ca.course_id
+           WHERE ca.student_id = ?
+           ORDER BY ca.created_at DESC`
+        )
+        .all(req.userId!);
+
       res.json({
         role: 'student',
         subscription,
@@ -1153,6 +2255,16 @@ export function createApiRouter() {
         suggested_mentors: suggestedMentors,
         stale_requests: staleRequests,
         pending_count: pendingOutgoing.length,
+        cycle_month: cycleMonth,
+        cycle_ends_at: cycleEndsAt,
+        active_courses: coursesSummary,
+        messaging_unlocked: messagingUnlocked,
+        one_on_one_unlocked: oneOnOneStatus.unlocked,
+        leaderboard_rank: oneOnOneStatus.rank,
+        is_competition_winner: oneOnOneStatus.is_winner,
+        followed_updates: followedUpdates,
+        upcoming_group_qas: upcomingGroupQAs,
+        my_assignments: myAssignments,
       });
       return;
     }
@@ -1162,7 +2274,12 @@ export function createApiRouter() {
         string,
         unknown
       >;
-      const mentorDetails = hydrateMentor(mentorRow);
+      const monthlyUsed = getMentorMonthlyConnectionsUsed(req.userId!);
+      const mentorDetails = {
+        ...hydrateMentor(mentorRow),
+        monthly_connections_used: monthlyUsed,
+        monthly_connections_limit: MENTOR_MONTHLY_CONNECTION_LIMIT,
+      };
 
       const pendingIncoming = db
         .prepare(
@@ -1190,7 +2307,7 @@ export function createApiRouter() {
            FROM meetings m
            JOIN availability a ON a.id = m.slot_id
            JOIN profiles p ON p.id = m.student_id
-           WHERE m.mentor_id = ? AND m.status = 'booked'
+           WHERE m.mentor_id = ? AND m.status = 'booked' AND m.type = 'one_on_one'
            ORDER BY a.start_at ASC`
         )
         .all(req.userId!);
@@ -1202,12 +2319,19 @@ export function createApiRouter() {
         )
         .all(req.userId!);
 
+      const topLeaderboard = buildLeaderboard().slice(0, 6);
+      const myUpdates = db
+        .prepare(`SELECT * FROM mentor_updates WHERE mentor_id = ? ORDER BY created_at DESC LIMIT 6`)
+        .all(req.userId!);
+
       res.json({
         role: 'mentor',
         mentor_details: mentorDetails,
         pending_requests: pendingWithTimer,
         upcoming_sessions: upcomingSessions,
         my_groups: myGroups,
+        leaderboard_preview: topLeaderboard,
+        my_updates: myUpdates,
       });
       return;
     }
@@ -1229,9 +2353,14 @@ export function createApiRouter() {
     const profile = hydrateProfile(profileRow) as Record<string, unknown>;
     const mentorRow =
       profile.role === 'mentor'
-        ? (db.prepare(`SELECT * FROM mentor_details WHERE profile_id = ?`).get(targetId) as
-            | Record<string, unknown>
-            | undefined)
+        ? (db
+            .prepare(
+              `SELECT md.*, COALESCE(pp.linkedin_verified, 0) as linkedin_verified
+               FROM mentor_details md
+               LEFT JOIN professional_profiles pp ON pp.profile_id = md.profile_id
+               WHERE md.profile_id = ?`
+            )
+            .get(targetId) as Record<string, unknown> | undefined)
         : undefined;
 
     const badges = db
@@ -1249,6 +2378,16 @@ export function createApiRouter() {
       )
       .all(targetId);
 
+    const assignments = db
+      .prepare(
+        `SELECT ca.*, c.title as course_title, c.niche_slug
+         FROM course_assignments ca
+         JOIN courses c ON c.id = ca.course_id
+         WHERE ca.student_id = ?
+         ORDER BY ca.created_at DESC`
+      )
+      .all(targetId);
+
     const sessionsAttended = (
       db
         .prepare(`SELECT COUNT(*) as c FROM meetings WHERE student_id = ? AND status = 'completed'`)
@@ -1259,6 +2398,16 @@ export function createApiRouter() {
     let isBlockedByMe = false;
     let isBlockedAny = false;
     let openSlots: Record<string, unknown>[] = [];
+    let isFollowing = false;
+    let followersCount = 0;
+    let mentorUpdates: Record<string, unknown>[] = [];
+    let mentorSeminars: Record<string, unknown>[] = [];
+    let viewerGates = {
+      messaging_unlocked: true,
+      one_on_one_unlocked: true,
+      leaderboard_rank: null as number | null,
+      is_winner: false,
+    };
 
     if (req.userId) {
       connection =
@@ -1272,6 +2421,18 @@ export function createApiRouter() {
         db.prepare(`SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?`).get(req.userId, targetId)
       );
       isBlockedAny = isBlockedBetween(db, req.userId, targetId);
+      isFollowing = Boolean(
+        db.prepare(`SELECT 1 FROM mentor_follows WHERE mentor_id = ? AND student_id = ?`).get(targetId, req.userId)
+      );
+      if (req.userRole === 'student') {
+        const oneOnOne = isStudentTop5OrWinner(req.userId);
+        viewerGates = {
+          messaging_unlocked: hasStudentUnlockedMessaging(req.userId),
+          one_on_one_unlocked: oneOnOne.unlocked,
+          leaderboard_rank: oneOnOne.rank,
+          is_winner: oneOnOne.is_winner,
+        };
+      }
     }
 
     if (profile.role === 'mentor') {
@@ -1280,18 +2441,53 @@ export function createApiRouter() {
           `SELECT * FROM availability WHERE mentor_id = ? AND is_booked = 0 AND start_at > ? ORDER BY start_at ASC`
         )
         .all(targetId, new Date().toISOString()) as Record<string, unknown>[];
+      followersCount = (
+        db.prepare(`SELECT COUNT(*) as c FROM mentor_follows WHERE mentor_id = ?`).get(targetId) as { c: number }
+      ).c;
+      mentorUpdates = db
+        .prepare(`SELECT * FROM mentor_updates WHERE mentor_id = ? ORDER BY created_at DESC`)
+        .all(targetId) as Record<string, unknown>[];
+      mentorSeminars = db
+        .prepare(
+          `SELECT m.id, m.topic, m.meet_url, m.group_id, g.name as group_name, a.start_at, a.end_at,
+                  (SELECT COUNT(*) FROM group_seminar_rsvps r WHERE r.meeting_id = m.id) as rsvp_count
+           FROM meetings m
+           LEFT JOIN availability a ON a.id = m.slot_id
+           LEFT JOIN groups g ON g.id = m.group_id
+           WHERE m.mentor_id = ? AND m.type = 'group_seminar' AND m.status = 'booked'
+           ORDER BY COALESCE(a.start_at, m.created_at) ASC`
+        )
+        .all(targetId) as Record<string, unknown>[];
     }
+
+    const mentorHydrated = hydrateMentor(mentorRow);
+    const enrichedMentorDetails = mentorHydrated
+      ? {
+          ...mentorHydrated,
+          monthly_connections_used: getMentorMonthlyConnectionsUsed(targetId),
+          monthly_connections_limit: MENTOR_MONTHLY_CONNECTION_LIMIT,
+        }
+      : null;
+
+    const studentRankInfo = profile.role === 'student' ? isStudentTop5OrWinner(targetId) : null;
 
     res.json({
       profile,
-      mentor_details: hydrateMentor(mentorRow),
+      mentor_details: enrichedMentorDetails,
       badges,
       certificates,
+      assignments,
+      student_rank_info: studentRankInfo,
       sessions_attended: sessionsAttended,
       connection,
       is_blocked_by_me: isBlockedByMe,
       is_blocked: isBlockedAny,
       open_slots: openSlots,
+      is_following: isFollowing,
+      followers_count: followersCount,
+      mentor_updates: mentorUpdates,
+      mentor_seminars: mentorSeminars,
+      viewer_gates: viewerGates,
     });
   });
 
@@ -1350,7 +2546,7 @@ export function createApiRouter() {
   });
 
   router.post('/connections', requireAuth, (req: AuthenticatedRequest, res) => {
-    const { receiver_id, message } = req.body || {};
+    const { receiver_id, message, track_context, specific_goal, focused_question } = req.body || {};
     if (!receiver_id || receiver_id === req.userId) {
       res.status(400).json({ error: 'Invalid connection recipient.' });
       return;
@@ -1369,20 +2565,70 @@ export function createApiRouter() {
       return;
     }
 
+    // Compose structured note from either structured fields or free-form message
+    const composedStructuredMessage = [
+      track_context ? `Course Track: ${String(track_context).trim()}` : '',
+      specific_goal ? `Goal: ${String(specific_goal).trim()}` : '',
+      focused_question ? `Question: ${String(focused_question).trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    const rawNote = composedStructuredMessage || String(message || '').trim();
+
     if (receiver.role === 'mentor') {
-      const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(receiver.id) as
-        | { status: string }
+      const md = db
+        .prepare(`SELECT status, is_demo, auto_welcome_message FROM mentor_details WHERE profile_id = ?`)
+        .get(receiver.id) as
+        | { status: string; is_demo: number; auto_welcome_message: string | null }
         | undefined;
       if (!md || md.status !== 'approved') {
-        res.status(403).json({ error: 'This mentor is still under review.' });
+        res.status(403).json({
+          error: 'This mentor is completing their 48-hour verification review. You can connect once verified.',
+        });
         return;
       }
+
       if (req.userRole === 'student') {
-        const sub = getEffectiveSubscription(db, req.userId!);
-        if (!sub || !sub.is_active) {
-          res.status(402).json({
-            error: 'Your 7-day trial has ended. Upgrade your plan or redeem an institution code to send mentor requests.',
-            code: 'PLAN_REQUIRED',
+        // Gate 1: Must complete at least one course & submit assignment before sending 1 structured message
+        if (!hasStudentUnlockedMessaging(req.userId!)) {
+          res.status(403).json({
+            code: 'COURSE_REQUIRED',
+            error:
+              'Complete a career course first to unlock sending 1 structured message to mentors. Meanwhile you can follow mentor updates, watch masterclasses, and attend monthly Group Q&A sessions!',
+          });
+          return;
+        }
+
+        // Gate 2: Reject vague/spam requests ("hi sir", "pls give internship", too short)
+        const normalizedLower = rawNote.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
+        const bannedShortPhrases = [
+          'hi',
+          'hi sir',
+          'hello',
+          'hello sir',
+          'hey',
+          'pls give me internship',
+          'please give me internship',
+          'internship please',
+          'need job',
+          'need internship',
+        ];
+        if (rawNote.length < 25 || bannedShortPhrases.includes(normalizedLower)) {
+          res.status(400).json({
+            code: 'STRUCTURED_MESSAGE_REQUIRED',
+            error:
+              'To prevent inbox flooding, please write a specific structured intro (your completed course track, career goal, and focused question — at least 25 characters).',
+          });
+          return;
+        }
+
+        // Gate 3: 30 students/month cap per mentor
+        const monthlyUsed = getMentorMonthlyConnectionsUsed(receiver.id);
+        if (monthlyUsed >= MENTOR_MONTHLY_CONNECTION_LIMIT) {
+          res.status(429).json({
+            code: 'MENTOR_MONTHLY_CAP',
+            error: `This mentor has reached their ${MENTOR_MONTHLY_CONNECTION_LIMIT}-student monthly connection limit for this month. Follow their updates or join a Group Q&A instead.`,
           });
           return;
         }
@@ -1401,13 +2647,130 @@ export function createApiRouter() {
     }
 
     const connId = uuid();
-    const { masked } = maskContactDetails(String(message || '').trim());
+    const { masked } = maskContactDetails(rawNote);
+    const nowIso = new Date().toISOString();
+
+    if (receiver.role === 'mentor') {
+      const studentProfile = db.prepare(`SELECT full_name FROM profiles WHERE id = ?`).get(req.userId!) as
+        | { full_name: string }
+        | undefined;
+      const mentorRow = db
+        .prepare(
+          `SELECT p.full_name, md.profession, md.company, md.talk_url, md.niches, md.is_demo, md.auto_welcome_message
+           FROM profiles p
+           JOIN mentor_details md ON md.profile_id = p.id
+           WHERE p.id = ?`
+        )
+        .get(receiver.id) as
+        | {
+            full_name: string;
+            profession: string;
+            company: string | null;
+            talk_url: string | null;
+            niches: string;
+            is_demo: number;
+            auto_welcome_message: string | null;
+          }
+        | undefined;
+
+      // Showcase TEDx speaker mentors (is_demo = 1) auto-accept after structured course check and deliver their 1 automated welcome note.
+      // Real mentors (including mentor@demo.com, is_demo = 0) hold as 'pending' with the student's 1 structured message until mentor clicks Accept!
+      if (mentorRow?.is_demo) {
+        const welcomeBody =
+          mentorRow.auto_welcome_message?.trim() ||
+          generateMentorBotReply({
+            studentName: studentProfile?.full_name || 'Student',
+            studentMessage: masked,
+            mentorName: mentorRow.full_name,
+            profession: mentorRow.profession || 'Industry Mentor',
+            company: mentorRow.company || null,
+            talkUrl: mentorRow.talk_url || null,
+            niches: parseJsonArray<string>(mentorRow.niches),
+          });
+
+        const msgId = uuid();
+        const replyAt = new Date(Date.now() + 500).toISOString();
+
+        const tx = db.transaction(() => {
+          db.prepare(
+            `INSERT INTO connections (id, requester_id, receiver_id, status, message, responded_at, created_at) VALUES (?, ?, ?, 'accepted', ?, ?, ?)`
+          ).run(connId, req.userId!, receiver_id, masked || null, nowIso, nowIso);
+
+          if (masked) {
+            db.prepare(`INSERT INTO messages (id, connection_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+              uuid(),
+              connId,
+              req.userId!,
+              masked,
+              nowIso
+            );
+          }
+
+          db.prepare(`INSERT INTO messages (id, connection_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+            msgId,
+            connId,
+            receiver.id,
+            welcomeBody,
+            replyAt
+          );
+        });
+        tx();
+
+        const botMsgPayload = {
+          id: msgId,
+          connection_id: connId,
+          sender_id: receiver.id,
+          body: welcomeBody,
+          created_at: replyAt,
+        };
+        emitToUsers([String(req.userId!), String(receiver_id)], 'connection_updated', { id: connId, status: 'accepted' });
+        emitToUsers([String(req.userId!), String(receiver_id)], 'new_message', botMsgPayload);
+
+        res.status(201).json({
+          ok: true,
+          id: connId,
+          status: 'accepted',
+          auto_accepted: true,
+          bot_reply: welcomeBody,
+        });
+        return;
+      }
+
+      // Real mentor: store the student's 1 structured message in pending state until mentor accepts
+      const tx = db.transaction(() => {
+        db.prepare(
+          `INSERT INTO connections (id, requester_id, receiver_id, status, message, responded_at, created_at) VALUES (?, ?, ?, 'pending', ?, NULL, ?)`
+        ).run(connId, req.userId!, receiver_id, masked || null, nowIso);
+
+        if (masked) {
+          db.prepare(`INSERT INTO messages (id, connection_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+            uuid(),
+            connId,
+            req.userId!,
+            masked,
+            nowIso
+          );
+        }
+      });
+      tx();
+
+      emitToUsers([String(receiver_id)], 'connection_updated', { id: connId, status: 'pending' });
+      res.status(201).json({
+        ok: true,
+        id: connId,
+        status: 'pending',
+        auto_accepted: false,
+      });
+      return;
+    }
+
+    // Student-to-student peer connection
     db.prepare(
       `INSERT INTO connections (id, requester_id, receiver_id, status, message, responded_at, created_at) VALUES (?, ?, ?, 'pending', ?, NULL, ?)`
-    ).run(connId, req.userId!, receiver_id, masked || null, new Date().toISOString());
+    ).run(connId, req.userId!, receiver_id, masked || null, nowIso);
 
     emitToUsers([String(receiver_id)], 'connection_updated', { id: connId });
-    res.status(201).json({ ok: true, id: connId });
+    res.status(201).json({ ok: true, id: connId, status: 'pending', auto_accepted: false });
   });
 
   router.patch('/connections/:id', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -1429,22 +2792,109 @@ export function createApiRouter() {
       return;
     }
 
+    let welcomeNoteSent: string | null = null;
+
     if (req.userRole === 'mentor') {
-      const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as {
-        status: string;
-      };
-      if (md.status !== 'approved') {
-        res.status(403).json({ error: 'Your mentor profile must be approved before accepting connections.' });
+      const md = db
+        .prepare(`SELECT status, auto_welcome_message, profession, company, talk_url, niches FROM mentor_details WHERE profile_id = ?`)
+        .get(req.userId!) as
+        | {
+            status: string;
+            auto_welcome_message: string | null;
+            profession: string;
+            company: string | null;
+            talk_url: string | null;
+            niches: string;
+          }
+        | undefined;
+      if (!md || md.status !== 'approved') {
+        res.status(403).json({
+          error: 'Your mentor profile is within the 48-hour verification window and cannot accept requests yet.',
+        });
         return;
       }
+
+      if (status === 'accepted') {
+        const used = getMentorMonthlyConnectionsUsed(req.userId!);
+        if (used >= MENTOR_MONTHLY_CONNECTION_LIMIT) {
+          res.status(429).json({
+            code: 'MENTOR_MONTHLY_CAP',
+            error: `You have reached your ${MENTOR_MONTHLY_CONNECTION_LIMIT} student connections limit for this month.`,
+          });
+          return;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const tx = db.transaction(() => {
+        db.prepare(`UPDATE connections SET status = ?, responded_at = ? WHERE id = ?`).run(status, nowIso, conn.id);
+
+        if (status === 'accepted') {
+          const mentorProfile = db.prepare(`SELECT full_name FROM profiles WHERE id = ?`).get(req.userId!) as
+            | { full_name: string }
+            | undefined;
+          const studentProfile = db.prepare(`SELECT full_name FROM profiles WHERE id = ?`).get(conn.requester_id) as
+            | { full_name: string }
+            | undefined;
+
+          // Ensure requester's structured note exists in messages if it wasn't inserted already
+          const hasInitialMsg = db
+            .prepare(`SELECT 1 FROM messages WHERE connection_id = ? LIMIT 1`)
+            .get(conn.id);
+          if (!hasInitialMsg && conn.message) {
+            db.prepare(`INSERT INTO messages (id, connection_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+              uuid(),
+              conn.id,
+              conn.requester_id,
+              String(conn.message),
+              String(conn.created_at || nowIso)
+            );
+          }
+
+          welcomeNoteSent =
+            md.auto_welcome_message?.trim() ||
+            generateMentorBotReply({
+              studentName: studentProfile?.full_name || 'Student',
+              studentMessage: String(conn.message || ''),
+              mentorName: mentorProfile?.full_name || 'Mentor',
+              profession: md.profession || 'Industry Mentor',
+              company: md.company || null,
+              talkUrl: md.talk_url || null,
+              niches: parseJsonArray<string>(md.niches),
+            });
+
+          const welcomeId = uuid();
+          const welcomeAt = new Date(Date.now() + 300).toISOString();
+          db.prepare(`INSERT INTO messages (id, connection_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+            welcomeId,
+            conn.id,
+            req.userId!,
+            welcomeNoteSent,
+            welcomeAt
+          );
+
+          emitToUsers([String(conn.requester_id), String(conn.receiver_id)], 'new_message', {
+            id: welcomeId,
+            connection_id: conn.id,
+            sender_id: req.userId!,
+            body: welcomeNoteSent,
+            created_at: welcomeAt,
+          });
+        }
+      });
+      tx();
+
+      recalculateMentorReplyHours(db, req.userId!);
+      emitToUsers([String(conn.requester_id), String(conn.receiver_id)], 'connection_updated', {
+        id: conn.id,
+        status,
+      });
+      res.json({ ok: true, status, welcome_message: welcomeNoteSent });
+      return;
     }
 
     const nowIso = new Date().toISOString();
     db.prepare(`UPDATE connections SET status = ?, responded_at = ? WHERE id = ?`).run(status, nowIso, conn.id);
-
-    if (req.userRole === 'mentor') {
-      recalculateMentorReplyHours(db, req.userId!);
-    }
 
     emitToUsers([String(conn.requester_id), String(conn.receiver_id)], 'connection_updated', {
       id: conn.id,
@@ -1508,11 +2958,7 @@ export function createApiRouter() {
       .prepare(`SELECT * FROM messages WHERE connection_id = ? ORDER BY created_at ASC`)
       .all(conn.id);
 
-    const subscription = req.userRole === 'student' ? getEffectiveSubscription(db, req.userId!) : null;
-    const mentorMessagingLocked =
-      req.userRole === 'student' &&
-      (peer as { role: string })?.role === 'mentor' &&
-      (!subscription || !subscription.is_active);
+    const mentorMessagingLocked = false;
 
     res.json({ connection: conn, peer, messages, mentor_messaging_locked: mentorMessagingLocked });
   });
@@ -1528,7 +2974,7 @@ export function createApiRouter() {
       | Record<string, unknown>
       | undefined;
     if (!conn || conn.status !== 'accepted') {
-      res.status(404).json({ error: 'Accepted connection not found.' });
+      res.status(404).json({ error: 'Open chat unlocks once the mentor accepts your structured connection request.' });
       return;
     }
     if (String(conn.requester_id) !== req.userId && String(conn.receiver_id) !== req.userId) {
@@ -1543,16 +2989,6 @@ export function createApiRouter() {
     }
 
     const peer = db.prepare(`SELECT role FROM profiles WHERE id = ?`).get(peerId) as { role: string };
-    if (req.userRole === 'student' && peer.role === 'mentor') {
-      const sub = getEffectiveSubscription(db, req.userId!);
-      if (!sub || !sub.is_active) {
-        res.status(402).json({
-          error: 'Your trial has expired. Upgrade to continue messaging mentors.',
-          code: 'PLAN_REQUIRED',
-        });
-        return;
-      }
-    }
 
     const { masked, wasMasked } = maskContactDetails(String(body).trim());
     const msgId = uuid();
@@ -1575,7 +3011,72 @@ export function createApiRouter() {
     };
 
     emitToUsers([String(conn.requester_id), String(conn.receiver_id)], 'new_message', savedMessage);
-    res.status(201).json({ message: savedMessage, was_masked: wasMasked });
+
+    let botReplyMessage: {
+      id: string;
+      connection_id: unknown;
+      sender_id: string;
+      body: string;
+      created_at: string;
+    } | null = null;
+
+    if (req.userRole === 'student' && peer.role === 'mentor') {
+      const mentorRow = db
+        .prepare(
+          `SELECT p.full_name, md.profession, md.company, md.talk_url, md.niches, md.is_demo
+           FROM profiles p
+           LEFT JOIN mentor_details md ON md.profile_id = p.id
+           WHERE p.id = ?`
+        )
+        .get(peerId) as
+        | {
+            full_name: string;
+            profession: string;
+            company: string | null;
+            talk_url: string | null;
+            niches: string;
+            is_demo: number;
+          }
+        | undefined;
+
+      // Showcase TEDx speaker mentors reply immediately so demo chats feel responsive;
+      // real mentors (is_demo = 0) hold genuine 2-way human threads.
+      if (mentorRow?.is_demo) {
+        const studentProfile = db.prepare(`SELECT full_name FROM profiles WHERE id = ?`).get(req.userId!) as
+          | { full_name: string }
+          | undefined;
+        const replyBody = generateMentorFollowupReply({
+          studentName: studentProfile?.full_name || 'Student',
+          studentMessage: masked,
+          mentorName: mentorRow.full_name,
+          profession: mentorRow.profession || 'Mentor',
+          company: mentorRow.company || null,
+          talkUrl: mentorRow.talk_url || null,
+          niches: parseJsonArray<string>(mentorRow.niches),
+        });
+        const replyId = uuid();
+        const replyCreatedAt = new Date(Date.now() + 400).toISOString();
+
+        db.prepare(`INSERT INTO messages (id, connection_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+          replyId,
+          conn.id,
+          peerId,
+          replyBody,
+          replyCreatedAt
+        );
+
+        botReplyMessage = {
+          id: replyId,
+          connection_id: conn.id,
+          sender_id: peerId,
+          body: replyBody,
+          created_at: replyCreatedAt,
+        };
+        emitToUsers([String(conn.requester_id), String(conn.receiver_id)], 'new_message', botReplyMessage);
+      }
+    }
+
+    res.status(201).json({ message: savedMessage, bot_reply: botReplyMessage, was_masked: wasMasked });
   });
 
   // GROUPS
@@ -1668,6 +3169,25 @@ export function createApiRouter() {
       )
       .all(group.id) as Array<Record<string, unknown>>;
 
+    const seminars = db
+      .prepare(
+        `SELECT m.id, m.mentor_id, m.group_id, m.topic, m.meet_url, m.status, m.created_at,
+                a.start_at, a.end_at, p.full_name as mentor_name, p.avatar_url as mentor_avatar, md.profession as mentor_profession,
+                (SELECT COUNT(*) FROM group_seminar_rsvps r WHERE r.meeting_id = m.id) as rsvp_count,
+                EXISTS(SELECT 1 FROM group_seminar_rsvps r2 WHERE r2.meeting_id = m.id AND r2.student_id = ?) as has_rsvped
+         FROM meetings m
+         LEFT JOIN availability a ON a.id = m.slot_id
+         JOIN profiles p ON p.id = m.mentor_id
+         LEFT JOIN mentor_details md ON md.profile_id = p.id
+         WHERE m.group_id = ? AND m.type = 'group_seminar' AND m.status = 'booked'
+         ORDER BY COALESCE(a.start_at, m.created_at) ASC`
+      )
+      .all(req.userId!, group.id)
+      .map((s: unknown) => {
+        const row = s as Record<string, unknown>;
+        return { ...row, has_rsvped: Boolean(row.has_rsvped) };
+      });
+
     res.json({
       group: { ...group, is_member: isMember },
       posts: posts.map((p) => ({
@@ -1675,7 +3195,117 @@ export function createApiRouter() {
         is_question: Boolean(p.is_question),
         is_mentor_answer: String(p.author_id) === String(group.mentor_id),
       })),
+      seminars,
     });
+  });
+
+  // Schedule a Monthly Group Q&A Session (Approved Mentors)
+  router.post('/groups/:id/seminars', requireAuth, (req: AuthenticatedRequest, res) => {
+    if (req.userRole !== 'mentor') {
+      res.status(403).json({ error: 'Only verified mentors can host monthly Group Q&A sessions.' });
+      return;
+    }
+    const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as
+      | { status: string }
+      | undefined;
+    if (!md || md.status !== 'approved') {
+      res.status(403).json({
+        error: 'Group Q&A hosting unlocks once your 48-hour mentor verification is approved.',
+      });
+      return;
+    }
+
+    const group = db.prepare(`SELECT id, name FROM groups WHERE id = ?`).get(req.params.id) as
+      | { id: string; name: string }
+      | undefined;
+    if (!group) {
+      res.status(404).json({ error: 'Group not found.' });
+      return;
+    }
+
+    const { topic, start_at, duration_minutes } = req.body || {};
+    if (!topic || !String(topic).trim() || !start_at) {
+      res.status(400).json({ error: 'Q&A topic and PKT date/time are required.' });
+      return;
+    }
+    const startDate = new Date(start_at);
+    if (Number.isNaN(startDate.getTime())) {
+      res.status(400).json({ error: 'Invalid date/time.' });
+      return;
+    }
+    const mins = [30, 45, 60].includes(Number(duration_minutes)) ? Number(duration_minutes) : 60;
+    const endDate = new Date(startDate.getTime() + mins * 60 * 1000);
+
+    const meetingId = uuid();
+    const slotId = uuid();
+    const meetUrl = `https://meet.google.com/out-${meetingId.replace(/-/g, '').slice(0, 4)}-${meetingId.replace(/-/g, '').slice(4, 7)}`;
+
+    const tx = db.transaction(() => {
+      db.prepare(`INSERT INTO availability (id, mentor_id, start_at, end_at, is_booked) VALUES (?, ?, ?, ?, 1)`).run(
+        slotId,
+        req.userId!,
+        startDate.toISOString(),
+        endDate.toISOString()
+      );
+      db.prepare(
+        `INSERT INTO meetings (id, mentor_id, student_id, slot_id, type, group_id, topic, meet_url, status, created_at)
+         VALUES (?, ?, ?, ?, 'group_seminar', ?, ?, ?, 'booked', ?)`
+      ).run(
+        meetingId,
+        req.userId!,
+        req.userId!,
+        slotId,
+        group.id,
+        String(topic).trim(),
+        meetUrl,
+        new Date().toISOString()
+      );
+    });
+    tx();
+
+    res.status(201).json({ ok: true, id: meetingId, meet_url: meetUrl, start_at: startDate.toISOString() });
+  });
+
+  // Student RSVP for Monthly Group Q&A
+  router.post('/groups/seminars/:meetingId/rsvp', requireAuth, (req: AuthenticatedRequest, res) => {
+    const meeting = db
+      .prepare(`SELECT id, type FROM meetings WHERE id = ? AND type = 'group_seminar'`)
+      .get(req.params.meetingId);
+    if (!meeting) {
+      res.status(404).json({ error: 'Group Q&A session not found.' });
+      return;
+    }
+
+    const existing = db
+      .prepare(`SELECT 1 FROM group_seminar_rsvps WHERE meeting_id = ? AND student_id = ?`)
+      .get(req.params.meetingId, req.userId!);
+    if (existing) {
+      db.prepare(`DELETE FROM group_seminar_rsvps WHERE meeting_id = ? AND student_id = ?`).run(
+        req.params.meetingId,
+        req.userId!
+      );
+    } else {
+      db.prepare(`INSERT INTO group_seminar_rsvps (meeting_id, student_id, created_at) VALUES (?, ?, ?)`).run(
+        req.params.meetingId,
+        req.userId!,
+        new Date().toISOString()
+      );
+      const rsvpTotal = (
+        db.prepare(`SELECT COUNT(*) as c FROM group_seminar_rsvps WHERE student_id = ?`).get(req.userId!) as {
+          c: number;
+        }
+      ).c;
+      if (rsvpTotal >= 5) {
+        awardBadge(db, req.userId!, 'seminar_5', 'Seminar Regular');
+      }
+    }
+
+    const count = (
+      db.prepare(`SELECT COUNT(*) as c FROM group_seminar_rsvps WHERE meeting_id = ?`).get(req.params.meetingId) as {
+        c: number;
+      }
+    ).c;
+    res.json({ ok: true, has_rsvped: !existing, rsvp_count: count });
   });
 
   router.post('/groups/:id/join', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -1742,7 +3372,30 @@ export function createApiRouter() {
   router.get('/sessions', requireAuth, (req: AuthenticatedRequest, res) => {
     const subscription = req.userRole === 'student' ? getEffectiveSubscription(db, req.userId!) : null;
 
+    const groupQAs = db
+      .prepare(
+        `SELECT m.id, m.mentor_id, m.group_id, g.name as group_name, m.topic, m.meet_url, m.status, m.created_at,
+                a.start_at, a.end_at, p.full_name as mentor_name, md.profession as mentor_profession,
+                (SELECT COUNT(*) FROM group_seminar_rsvps r WHERE r.meeting_id = m.id) as rsvp_count,
+                EXISTS(SELECT 1 FROM group_seminar_rsvps r2 WHERE r2.meeting_id = m.id AND r2.student_id = ?) as has_rsvped
+         FROM meetings m
+         LEFT JOIN availability a ON a.id = m.slot_id
+         LEFT JOIN groups g ON g.id = m.group_id
+         JOIN profiles p ON p.id = m.mentor_id
+         LEFT JOIN mentor_details md ON md.profile_id = p.id
+         WHERE m.type = 'group_seminar' AND m.status = 'booked'
+         ORDER BY COALESCE(a.start_at, m.created_at) ASC`
+      )
+      .all(req.userId!)
+      .map((s: unknown) => {
+        const row = s as Record<string, unknown>;
+        return { ...row, has_rsvped: Boolean(row.has_rsvped) };
+      });
+
     if (req.userRole === 'mentor') {
+      const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as
+        | { status: string }
+        | undefined;
       const slots = db
         .prepare(`SELECT * FROM availability WHERE mentor_id = ? ORDER BY start_at ASC`)
         .all(req.userId!);
@@ -1754,11 +3407,11 @@ export function createApiRouter() {
            LEFT JOIN availability a ON a.id = m.slot_id
            JOIN profiles p ON p.id = m.student_id
            LEFT JOIN certificates c ON c.meeting_id = m.id
-           WHERE m.mentor_id = ?
+           WHERE m.mentor_id = ? AND m.type = 'one_on_one'
            ORDER BY COALESCE(a.start_at, m.created_at) DESC`
         )
         .all(req.userId!);
-      res.json({ role: 'mentor', slots, meetings });
+      res.json({ role: 'mentor', mentor_status: md?.status || 'pending', slots, meetings, group_qas: groupQAs });
       return;
     }
 
@@ -1771,35 +3424,43 @@ export function createApiRouter() {
          JOIN profiles p ON p.id = m.mentor_id
          LEFT JOIN mentor_details md ON md.profile_id = p.id
          LEFT JOIN certificates c ON c.meeting_id = m.id
-         WHERE m.student_id = ?
+         WHERE m.student_id = ? AND m.type = 'one_on_one'
          ORDER BY COALESCE(a.start_at, m.created_at) DESC`
       )
       .all(req.userId!);
 
-    // Connected mentors with open slots
+    const oneOnOneStatus = isStudentTop5OrWinner(req.userId!);
+
+    // Approved mentors with open slots (connected mentors first, all approved mentors available when Top 5 / Winner unlocked)
     const connectedMentors = db
       .prepare(
         `SELECT p.id, p.full_name, p.avatar_url, md.profession, md.company, md.avg_reply_hours
-         FROM connections c
-         JOIN profiles p ON p.id = CASE WHEN c.requester_id = ? THEN c.receiver_id ELSE c.requester_id END
+         FROM profiles p
          JOIN mentor_details md ON md.profile_id = p.id
-         WHERE (c.requester_id = ? OR c.receiver_id = ?) AND c.status = 'accepted' AND p.role = 'mentor'`
+         WHERE md.status = 'approved' AND p.role = 'mentor'
+         ORDER BY COALESCE(md.avg_reply_hours, 999) ASC`
       )
-      .all(req.userId!, req.userId!, req.userId!) as Array<Record<string, unknown>>;
+      .all() as Array<Record<string, unknown>>;
 
     const nowIso = new Date().toISOString();
-    const bookableMentors = connectedMentors.map((m) => ({
-      ...m,
-      open_slots: db
-        .prepare(`SELECT * FROM availability WHERE mentor_id = ? AND is_booked = 0 AND start_at > ? ORDER BY start_at ASC`)
-        .all(m.id, nowIso),
-    }));
+    const bookableMentors = connectedMentors
+      .map((m) => ({
+        ...m,
+        open_slots: db
+          .prepare(`SELECT * FROM availability WHERE mentor_id = ? AND is_booked = 0 AND start_at > ? ORDER BY start_at ASC`)
+          .all(m.id, nowIso),
+      }))
+      .filter((m) => m.open_slots.length > 0);
 
     res.json({
       role: 'student',
       subscription,
       meetings,
       connected_mentors: bookableMentors,
+      one_on_one_unlocked: oneOnOneStatus.unlocked,
+      leaderboard_rank: oneOnOneStatus.rank,
+      is_competition_winner: oneOnOneStatus.is_winner,
+      group_qas: groupQAs,
     });
   });
 
@@ -1812,7 +3473,7 @@ export function createApiRouter() {
       status: string;
     };
     if (!md || md.status !== 'approved') {
-      res.status(403).json({ error: 'Your mentor profile must be approved before adding slots.' });
+      res.status(403).json({ error: '1:1 slots unlock once your 48-hour mentor verification is complete.' });
       return;
     }
 
@@ -1865,6 +3526,18 @@ export function createApiRouter() {
       res.status(403).json({ error: 'Only students can book 1:1 sessions.' });
       return;
     }
+
+    // 1:1 Meeting Gate: Competition Winner or Top 5 placement required
+    const eligibility = isStudentTop5OrWinner(req.userId!);
+    if (!eligibility.unlocked) {
+      res.status(403).json({
+        code: 'TOP_5_REQUIRED',
+        error:
+          '1:1 Mentor Meetings unlock when you win a Monthly Competition or place in the Top 5 on the Student Leaderboard. You can still attend free Monthly Group Q&A sessions!',
+      });
+      return;
+    }
+
     const { slot_id, topic } = req.body || {};
     if (!slot_id) {
       res.status(400).json({ error: 'Please select a time slot.' });
@@ -1883,37 +3556,16 @@ export function createApiRouter() {
         return { error: 'Booking unavailable.', status: 403 };
       }
 
-      const connected = db
-        .prepare(
-          `SELECT 1 FROM connections
-           WHERE status = 'accepted'
-             AND ((requester_id = ? AND receiver_id = ?) OR (requester_id = ? AND receiver_id = ?))`
-        )
-        .get(req.userId!, slot.mentor_id, slot.mentor_id, req.userId!);
-      if (!connected) {
-        return { error: 'You can only book mentors you are connected with.', status: 403 };
-      }
-
-      const sub = getEffectiveSubscription(db, req.userId!);
-      if (!sub) {
-        return { error: 'Subscription not found.', status: 400 };
-      }
-
-      if (sub.effective_plan === 'institution' || sub.effective_plan === 'monthly' || sub.effective_plan === 'yearly') {
-        // allowed
-      } else if (sub.effective_plan === 'trial' && sub.free_sessions_left > 0) {
-        db.prepare(`UPDATE subscriptions SET free_sessions_left = free_sessions_left - 1 WHERE id = ?`).run(sub.id);
-      } else {
-        return {
-          error: 'You have used your 1 free trial session. Upgrade to Monthly, Yearly, or redeem an institution code to book another 1:1.',
-          status: 402,
-          code: 'PLAN_REQUIRED',
-        };
-      }
-
       db.prepare(`UPDATE availability SET is_booked = 1 WHERE id = ?`).run(slot.id);
       const meetingId = uuid();
-      const meetUrl = `https://meet.jit.si/outspace-${meetingId}`;
+      const shortA = meetingId.replace(/-/g, '').slice(0, 4);
+      const shortB = meetingId.replace(/-/g, '').slice(4, 7);
+      const meetUrl = `https://meet.google.com/out-${shortA}-${shortB}`;
+      const topicStr = String(topic || '1:1 Career Mentorship Session').trim();
+
+      const mentorProfile = db.prepare(`SELECT full_name FROM profiles WHERE id = ?`).get(slot.mentor_id) as
+        | { full_name: string }
+        | undefined;
 
       db.prepare(
         `INSERT INTO meetings (id, mentor_id, student_id, slot_id, type, group_id, topic, meet_url, status, created_at)
@@ -1923,17 +3575,37 @@ export function createApiRouter() {
         slot.mentor_id,
         req.userId!,
         slot.id,
-        String(topic || '1:1 Career Mentorship Session').trim(),
+        topicStr,
         meetUrl,
         new Date().toISOString()
       );
 
-      return { ok: true, id: meetingId, meet_url: meetUrl };
+      return {
+        ok: true,
+        id: meetingId,
+        status: 'confirmed',
+        meet_url: meetUrl,
+        start_at: slot.start_at,
+        end_at: slot.end_at,
+        mentor_name: mentorProfile?.full_name || 'Mentor',
+        topic: topicStr,
+      };
     });
 
-    const result = tx() as { error?: string; status?: number; code?: string; ok?: boolean; id?: string; meet_url?: string };
+    const result = tx() as {
+      error?: string;
+      status?: number | string;
+      code?: string;
+      ok?: boolean;
+      id?: string;
+      meet_url?: string;
+      start_at?: string;
+      end_at?: string;
+      mentor_name?: string;
+      topic?: string;
+    };
     if (result.error) {
-      res.status(result.status || 400).json({ error: result.error, code: result.code });
+      res.status(Number(result.status) || 400).json({ error: result.error, code: result.code });
       return;
     }
     res.status(201).json(result);
@@ -2263,6 +3935,509 @@ export function createApiRouter() {
     res.json({ ok: true, is_career_fit: false, score, earned_quiz_ace: earnedQuizAce, result: resultPayload });
   });
 
+  // COURSES, POST-COURSE ASSIGNMENTS & MONTHLY COMPETITIONS
+  router.get('/courses', requireAuth, (req: AuthenticatedRequest, res) => {
+    const cycleMonth = getCurrentCycleMonth();
+    const rows = db
+      .prepare(
+        `SELECT c.*, n.name as niche_name, p.full_name as author_name, p.avatar_url as author_avatar,
+                (SELECT COUNT(*) FROM course_modules cm WHERE cm.course_id = c.id) as module_count,
+                (SELECT COUNT(*) FROM course_progress cp WHERE cp.course_id = c.id AND cp.student_id = ?) as completed_count,
+                (SELECT COUNT(*) FROM competition_entries ce WHERE ce.course_id = c.id AND ce.cycle_month = ?) as cohort_count,
+                EXISTS(SELECT 1 FROM competition_entries ce2 WHERE ce2.course_id = c.id AND ce2.student_id = ? AND ce2.cycle_month = ?) as has_entered_competition,
+                EXISTS(SELECT 1 FROM course_assignments ca WHERE ca.course_id = c.id AND ca.student_id = ?) as has_submitted_assignment
+         FROM courses c
+         LEFT JOIN niches n ON n.slug = c.niche_slug
+         LEFT JOIN profiles p ON p.id = c.author_id
+         ORDER BY c.is_coming_soon ASC, c.title ASC`
+      )
+      .all(req.userId!, cycleMonth, req.userId!, cycleMonth, req.userId!) as Array<Record<string, unknown>>;
+
+    const courses = rows.map((r) => ({
+      ...r,
+      is_coming_soon: Boolean(r.is_coming_soon),
+      has_entered_competition: Boolean(r.has_entered_competition),
+      has_submitted_assignment: Boolean(r.has_submitted_assignment),
+      is_active_track: isActiveTrackSlug(String(r.niche_slug || '')),
+    }));
+
+    const mentorStatusRow =
+      req.userRole === 'mentor'
+        ? (db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as
+            | { status: string }
+            | undefined)
+        : undefined;
+
+    res.json({
+      courses,
+      cycle_month: cycleMonth,
+      days_left_in_cycle: getDaysLeftInCycle(),
+      mentor_status: mentorStatusRow?.status || null,
+    });
+  });
+
+  // Verified mentors can publish/record a new track course (locked during 48h verification!)
+  router.post('/courses', requireAuth, (req: AuthenticatedRequest, res) => {
+    if (req.userRole !== 'mentor') {
+      res.status(403).json({ error: 'Only verified mentors can record and publish courses.' });
+      return;
+    }
+    const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as
+      | { status: string }
+      | undefined;
+    if (!md || md.status !== 'approved') {
+      res.status(403).json({
+        error:
+          'Recording and publishing courses is locked while your account is in the 48-hour verification window.',
+      });
+      return;
+    }
+
+    const { title, subtitle, niche_slug, description, video_url, module_title } = req.body || {};
+    if (!title || !niche_slug || !description) {
+      res.status(400).json({ error: 'Course title, track niche, and description are required.' });
+      return;
+    }
+
+    const profile = db.prepare(`SELECT full_name FROM profiles WHERE id = ?`).get(req.userId!) as { full_name: string };
+    const mentorMeta = db
+      .prepare(`SELECT profession, company FROM mentor_details WHERE profile_id = ?`)
+      .get(req.userId!) as { profession: string; company: string | null };
+
+    const courseId = uuid();
+    const modId = uuid();
+    const nowIso = new Date().toISOString();
+
+    const tx = db.transaction(() => {
+      db.prepare(
+        `INSERT INTO courses (id, niche_slug, author_id, title, subtitle, description, duration_label, is_coming_soon, competition_title, competition_brief, meetup_title, meetup_venue, meetup_date_label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, '18 min · 1 module', 0, ?, ?, ?, 'Karachi / Lahore / Online Live', 'Last Saturday of the Month', ?)`
+      ).run(
+        courseId,
+        String(niche_slug),
+        req.userId!,
+        String(title).trim(),
+        subtitle ? String(subtitle).trim() : `${String(title).trim()} — Mentor-Led Track`,
+        String(description).trim(),
+        `${String(title).trim()} Monthly Challenge`,
+        'Submit a 2-minute video or presentation pitch applying this track to a real Pakistani problem.',
+        `${String(title).trim()} Live Showcase`,
+        nowIso
+      );
+
+      db.prepare(
+        `INSERT INTO course_modules (id, course_id, position, title, speaker_name, speaker_role, duration_seconds, video_url, summary, key_takeaways)
+         VALUES (?, ?, 1, ?, ?, ?, 900, ?, ?, ?)`
+      ).run(
+        modId,
+        courseId,
+        module_title ? String(module_title).trim() : `${String(title).trim()} — Masterclass Lesson`,
+        profile.full_name,
+        `${mentorMeta.profession}${mentorMeta.company ? ` @ ${mentorMeta.company}` : ''}`,
+        video_url ? String(video_url).trim() : null,
+        String(description).trim(),
+        JSON.stringify(['Core career reality in Pakistan', 'Hands-on mini assignment rubric', 'How to stand out in top 5'])
+      );
+    });
+    tx();
+
+    res.status(201).json({ ok: true, id: courseId });
+  });
+
+  router.get('/courses/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+    const course = db
+      .prepare(
+        `SELECT c.*, n.name as niche_name, p.full_name as author_name, p.avatar_url as author_avatar,
+                md.profession as author_profession, md.company as author_company
+         FROM courses c
+         LEFT JOIN niches n ON n.slug = c.niche_slug
+         LEFT JOIN profiles p ON p.id = c.author_id
+         LEFT JOIN mentor_details md ON md.profile_id = p.id
+         WHERE c.id = ?`
+      )
+      .get(req.params.id) as Record<string, unknown> | undefined;
+
+    if (!course) {
+      res.status(404).json({ error: 'Course not found.' });
+      return;
+    }
+
+    const cycleMonth = getCurrentCycleMonth();
+    const modules = (
+      db
+        .prepare(`SELECT * FROM course_modules WHERE course_id = ? ORDER BY position ASC`)
+        .all(course.id) as Array<Record<string, unknown>>
+    ).map((m) => ({
+      ...m,
+      key_takeaways: parseJsonArray<string>(m.key_takeaways),
+    }));
+
+    const completedRows = db
+      .prepare(`SELECT module_id FROM course_progress WHERE course_id = ? AND student_id = ?`)
+      .all(course.id, req.userId!) as Array<{ module_id: string }>;
+    const completedModuleIds = completedRows.map((r) => r.module_id);
+    const isCourseCompleted = modules.length > 0 && completedModuleIds.length >= modules.length;
+
+    const myAssignment =
+      (db
+        .prepare(`SELECT * FROM course_assignments WHERE course_id = ? AND student_id = ?`)
+        .get(course.id, req.userId!) as Record<string, unknown> | undefined) || null;
+
+    const participationBadge = db
+      .prepare(`SELECT * FROM badges WHERE student_id = ? AND type = 'course_fellow' LIMIT 1`)
+      .get(req.userId!) || null;
+
+    const competitionBadge = db
+      .prepare(`SELECT * FROM badges WHERE student_id = ? AND type = 'competition_honours' LIMIT 1`)
+      .get(req.userId!) || null;
+
+    const myEntry =
+      (db
+        .prepare(
+          `SELECT ce.*, cert.verify_code
+           FROM competition_entries ce
+           LEFT JOIN certificates cert ON cert.id = ce.certificate_id
+           WHERE ce.course_id = ? AND ce.student_id = ? AND ce.cycle_month = ?`
+        )
+        .get(course.id, req.userId!, cycleMonth) as Record<string, unknown> | undefined) || null;
+
+    const peerRows = db
+      .prepare(
+        `SELECT ce.id, ce.student_id, ce.pitch_title, ce.problem_statement, ce.solution_summary,
+                ce.in_person_rsvp, ce.status, ce.rank, ce.score, ce.created_at,
+                p.full_name as student_name, p.avatar_url as student_avatar, p.city as student_city,
+                p.grade_level as student_grade, p.school_name as student_school
+         FROM competition_entries ce
+         JOIN profiles p ON p.id = ce.student_id
+         WHERE ce.course_id = ? AND ce.cycle_month = ?
+         ORDER BY COALESCE(ce.rank, 999) ASC, ce.score DESC, ce.created_at DESC`
+      )
+      .all(course.id, cycleMonth) as Array<Record<string, unknown>>;
+
+    const cohortPeers = peerRows.map((peer) => {
+      const peerId = String(peer.student_id);
+      const conn =
+        peerId !== req.userId
+          ? (db
+              .prepare(
+                `SELECT status FROM connections WHERE (requester_id = ? AND receiver_id = ?) OR (requester_id = ? AND receiver_id = ?)`
+              )
+              .get(req.userId!, peerId, peerId, req.userId!) as { status: string } | undefined)
+          : undefined;
+      return {
+        ...peer,
+        in_person_rsvp: Boolean(peer.in_person_rsvp),
+        connection_status: conn?.status || null,
+      };
+    });
+
+    res.json({
+      course: {
+        ...course,
+        is_coming_soon: Boolean(course.is_coming_soon),
+        is_active_track: isActiveTrackSlug(String(course.niche_slug || '')),
+        module_count: modules.length,
+        completed_count: completedModuleIds.length,
+      },
+      modules,
+      completed_module_ids: completedModuleIds,
+      is_course_completed: isCourseCompleted,
+      my_assignment: myAssignment,
+      participation_badge: participationBadge,
+      competition_badge: competitionBadge,
+      cycle_month: cycleMonth,
+      days_left_in_cycle: getDaysLeftInCycle(),
+      my_entry: myEntry ? { ...myEntry, in_person_rsvp: Boolean(myEntry.in_person_rsvp) } : null,
+      cohort_peers: cohortPeers,
+    });
+  });
+
+  // Post-Course Video / Presentation Assignment (added to Student Profile & unlocks 1 structured message!)
+  router.post('/courses/:id/assignment', requireAuth, (req: AuthenticatedRequest, res) => {
+    const course = db.prepare(`SELECT id, title, is_coming_soon FROM courses WHERE id = ?`).get(req.params.id) as
+      | { id: string; title: string; is_coming_soon: number }
+      | undefined;
+    if (!course) {
+      res.status(404).json({ error: 'Course not found.' });
+      return;
+    }
+    if (course.is_coming_soon) {
+      res.status(400).json({ error: 'Assignments open once this course launches.' });
+      return;
+    }
+
+    const totalModules = (
+      db.prepare(`SELECT COUNT(*) as c FROM course_modules WHERE course_id = ?`).get(course.id) as { c: number }
+    ).c;
+    const completedCount = (
+      db
+        .prepare(`SELECT COUNT(*) as c FROM course_progress WHERE course_id = ? AND student_id = ?`)
+        .get(course.id, req.userId!) as { c: number }
+    ).c;
+    if (completedCount < totalModules) {
+      res.status(400).json({
+        error: `Watch all ${totalModules} modules first (${completedCount}/${totalModules}) before submitting your post-course assignment.`,
+      });
+      return;
+    }
+
+    const { submission_type, title, summary, asset_url } = req.body || {};
+    if (!['video', 'presentation'].includes(submission_type)) {
+      res.status(400).json({ error: 'Select whether you are submitting a video or a presentation.' });
+      return;
+    }
+    if (!title || String(title).trim().length < 4 || !summary || String(summary).trim().length < 15 || !asset_url) {
+      res.status(400).json({
+        error: 'Assignment title, short summary (15+ chars), and valid link to your video/presentation are required.',
+      });
+      return;
+    }
+
+    const existing = db
+      .prepare(`SELECT id, score FROM course_assignments WHERE course_id = ? AND student_id = ?`)
+      .get(course.id, req.userId!) as { id: string; score: number } | undefined;
+
+    const assignmentId = existing?.id || uuid();
+    const initialScore = existing?.score || 84;
+    const nowIso = new Date().toISOString();
+
+    const tx = db.transaction(() => {
+      if (existing) {
+        db.prepare(
+          `UPDATE course_assignments
+           SET submission_type = ?, title = ?, summary = ?, asset_url = ?, created_at = ?
+           WHERE id = ?`
+        ).run(
+          submission_type,
+          String(title).trim(),
+          String(summary).trim(),
+          String(asset_url).trim(),
+          nowIso,
+          existing.id
+        );
+      } else {
+        db.prepare(
+          `INSERT INTO course_assignments (id, course_id, student_id, submission_type, title, summary, asset_url, score, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          assignmentId,
+          course.id,
+          req.userId!,
+          submission_type,
+          String(title).trim(),
+          String(summary).trim(),
+          String(asset_url).trim(),
+          initialScore,
+          nowIso
+        );
+      }
+
+      awardBadge(db, req.userId!, 'course_fellow', 'Course Fellow');
+    });
+    tx();
+
+    const saved = db.prepare(`SELECT * FROM course_assignments WHERE id = ?`).get(assignmentId);
+    res.status(201).json({
+      ok: true,
+      assignment: saved,
+      messaging_unlocked: true,
+    });
+  });
+
+  router.post('/courses/:id/modules/:moduleId/complete', requireAuth, (req: AuthenticatedRequest, res) => {
+    const course = db.prepare(`SELECT id, title, is_coming_soon FROM courses WHERE id = ?`).get(req.params.id) as
+      | { id: string; title: string; is_coming_soon: number }
+      | undefined;
+    if (!course) {
+      res.status(404).json({ error: 'Course not found.' });
+      return;
+    }
+    if (course.is_coming_soon) {
+      res.status(400).json({ error: 'This course curriculum is coming soon.' });
+      return;
+    }
+
+    const mod = db
+      .prepare(`SELECT id FROM course_modules WHERE id = ? AND course_id = ?`)
+      .get(req.params.moduleId, course.id);
+    if (!mod) {
+      res.status(404).json({ error: 'Module not found.' });
+      return;
+    }
+
+    db.prepare(
+      `INSERT OR IGNORE INTO course_progress (student_id, course_id, module_id, completed_at) VALUES (?, ?, ?, ?)`
+    ).run(req.userId!, course.id, req.params.moduleId, new Date().toISOString());
+
+    const totalModules = (
+      db.prepare(`SELECT COUNT(*) as c FROM course_modules WHERE course_id = ?`).get(course.id) as { c: number }
+    ).c;
+    const completedRows = db
+      .prepare(`SELECT module_id FROM course_progress WHERE course_id = ? AND student_id = ?`)
+      .all(course.id, req.userId!) as Array<{ module_id: string }>;
+    const completedModuleIds = completedRows.map((r) => r.module_id);
+    const isCourseCompleted = totalModules > 0 && completedModuleIds.length >= totalModules;
+
+    let awardedBadge: string | null = null;
+    if (isCourseCompleted) {
+      const existingBadge = db
+        .prepare(`SELECT id FROM badges WHERE student_id = ? AND type = 'course_fellow'`)
+        .get(req.userId!);
+      if (!existingBadge) {
+        awardBadge(db, req.userId!, 'course_fellow', 'Course Fellow');
+        awardedBadge = 'Course Fellow';
+      }
+    }
+
+    res.json({
+      ok: true,
+      completed_module_ids: completedModuleIds,
+      is_course_completed: isCourseCompleted,
+      awarded_badge: awardedBadge,
+    });
+  });
+
+  router.post('/courses/:id/compete', requireAuth, (req: AuthenticatedRequest, res) => {
+    const course = db
+      .prepare(`SELECT * FROM courses WHERE id = ?`)
+      .get(req.params.id) as Record<string, unknown> | undefined;
+    if (!course) {
+      res.status(404).json({ error: 'Course not found.' });
+      return;
+    }
+    if (course.is_coming_soon) {
+      res.status(400).json({ error: 'Competition opens once this course launches.' });
+      return;
+    }
+
+    const totalModules = (
+      db.prepare(`SELECT COUNT(*) as c FROM course_modules WHERE course_id = ?`).get(course.id) as { c: number }
+    ).c;
+    const completedCount = (
+      db
+        .prepare(`SELECT COUNT(*) as c FROM course_progress WHERE course_id = ? AND student_id = ?`)
+        .get(course.id, req.userId!) as { c: number }
+    ).c;
+
+    if (completedCount < totalModules) {
+      res.status(400).json({
+        error: `Watch all ${totalModules} video modules first (${completedCount}/${totalModules} complete) to unlock the mandatory monthly competition.`,
+      });
+      return;
+    }
+
+    const { pitch_title, problem_statement, solution_summary, pitch_link, in_person_rsvp } = req.body || {};
+    if (!pitch_title || !String(pitch_title).trim() || !problem_statement || !solution_summary) {
+      res.status(400).json({ error: 'Please complete your pitch title, problem statement, and solution summary.' });
+      return;
+    }
+
+    const cycleMonth = getCurrentCycleMonth();
+    const entryId = uuid();
+    const certId = uuid();
+    const verifyCode = cryptoRandomCode(8);
+    const issuedAt = new Date().toISOString();
+    const feedback = `Honours Finalist in ${String(course.competition_title)} (${cycleMonth}). Clear problem framing and practical solution ready for the ${String(course.meetup_venue)} in-person showcase.`;
+
+    const existing = db
+      .prepare(`SELECT id, certificate_id FROM competition_entries WHERE course_id = ? AND student_id = ? AND cycle_month = ?`)
+      .get(course.id, req.userId!, cycleMonth) as { id: string; certificate_id: string | null } | undefined;
+
+    let finalCertId = existing?.certificate_id || certId;
+    let finalVerifyCode = verifyCode;
+
+    const tx = db.transaction(() => {
+      if (existing?.certificate_id) {
+        const existingCert = db
+          .prepare(`SELECT verify_code FROM certificates WHERE id = ?`)
+          .get(existing.certificate_id) as { verify_code: string } | undefined;
+        if (existingCert) {
+          finalVerifyCode = existingCert.verify_code;
+        }
+      } else {
+        db.prepare(
+          `INSERT INTO certificates (id, student_id, mentor_id, meeting_id, title, verify_code, issued_at) VALUES (?, ?, ?, NULL, ?, ?, ?)`
+        ).run(
+          finalCertId,
+          req.userId!,
+          String(course.author_id),
+          `${String(course.competition_title)} — Monthly Honours`,
+          finalVerifyCode,
+          issuedAt
+        );
+      }
+
+      if (existing) {
+        db.prepare(
+          `UPDATE competition_entries
+           SET pitch_title = ?, problem_statement = ?, solution_summary = ?, pitch_link = ?, in_person_rsvp = ?, status = CASE WHEN status IN ('winner','top_5') THEN status ELSE 'honours_awarded' END, score = CASE WHEN score = 0 THEN 82 ELSE score END, mentor_feedback = ?, certificate_id = ?
+           WHERE id = ?`
+        ).run(
+          String(pitch_title).trim(),
+          String(problem_statement).trim(),
+          String(solution_summary).trim(),
+          pitch_link ? String(pitch_link).trim() : null,
+          in_person_rsvp === false ? 0 : 1,
+          feedback,
+          finalCertId,
+          existing.id
+        );
+      } else {
+        db.prepare(
+          `INSERT INTO competition_entries
+           (id, course_id, student_id, cycle_month, pitch_title, problem_statement, solution_summary, pitch_link, in_person_rsvp, status, score, mentor_feedback, certificate_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'honours_awarded', 82, ?, ?, ?)`
+        ).run(
+          entryId,
+          course.id,
+          req.userId!,
+          cycleMonth,
+          String(pitch_title).trim(),
+          String(problem_statement).trim(),
+          String(solution_summary).trim(),
+          pitch_link ? String(pitch_link).trim() : null,
+          in_person_rsvp === false ? 0 : 1,
+          feedback,
+          finalCertId,
+          issuedAt
+        );
+      }
+
+      awardBadge(db, req.userId!, 'course_fellow', 'Course Fellow');
+      awardBadge(db, req.userId!, 'competition_honours', 'Competition Finalist');
+    });
+    tx();
+
+    const savedEntry = db
+      .prepare(
+        `SELECT ce.*, cert.verify_code FROM competition_entries ce LEFT JOIN certificates cert ON cert.id = ce.certificate_id WHERE ce.course_id = ? AND ce.student_id = ? AND ce.cycle_month = ?`
+      )
+      .get(course.id, req.userId!, cycleMonth) as Record<string, unknown>;
+
+    res.status(201).json({
+      ok: true,
+      entry: { ...savedEntry, in_person_rsvp: Boolean(savedEntry.in_person_rsvp) },
+      certificate_id: finalCertId,
+      verify_code: finalVerifyCode,
+    });
+  });
+
+  router.post('/courses/:id/rsvp', requireAuth, (req: AuthenticatedRequest, res) => {
+    const cycleMonth = getCurrentCycleMonth();
+    const existing = db
+      .prepare(`SELECT id, in_person_rsvp FROM competition_entries WHERE course_id = ? AND student_id = ? AND cycle_month = ?`)
+      .get(req.params.id, req.userId!, cycleMonth) as { id: string; in_person_rsvp: number } | undefined;
+
+    if (!existing) {
+      res.status(404).json({ error: 'Submit your monthly competition entry first to manage your in-person meetup RSVP.' });
+      return;
+    }
+
+    const nextRsvp = existing.in_person_rsvp ? 0 : 1;
+    db.prepare(`UPDATE competition_entries SET in_person_rsvp = ? WHERE id = ?`).run(nextRsvp, existing.id);
+    res.json({ ok: true, in_person_rsvp: Boolean(nextRsvp) });
+  });
+
   // CERTIFICATES & PUBLIC VERIFY
   router.get('/certificates/:id', requireAuth, (req: AuthenticatedRequest, res) => {
     const cert = db
@@ -2400,10 +4575,11 @@ export function createApiRouter() {
   router.get('/admin/overview', requireAuth, requireAdmin, (_req, res) => {
     const pendingMentors = db
       .prepare(
-        `SELECT p.id, p.full_name, p.city, p.bio, p.created_at, au.email, md.*
+        `SELECT p.id, p.full_name, p.city, p.bio, p.created_at, au.email, md.*, COALESCE(pp.linkedin_verified, 0) as linkedin_verified, pp.headline
          FROM profiles p
          JOIN auth_users au ON au.id = p.id
          JOIN mentor_details md ON md.profile_id = p.id
+         LEFT JOIN professional_profiles pp ON pp.profile_id = p.id
          WHERE md.status = 'pending'
          ORDER BY p.created_at ASC`
       )
@@ -2412,9 +4588,25 @@ export function createApiRouter() {
 
     const allMentors = db
       .prepare(
-        `SELECT p.id, p.full_name, p.city, md.profession, md.company, md.status, md.linkedin_url, md.sessions_completed
-         FROM profiles p JOIN mentor_details md ON md.profile_id = p.id
+        `SELECT p.id, p.full_name, p.city, md.profession, md.company, md.status, md.linkedin_url, md.sessions_completed,
+                md.vip_code, md.vip_partner, md.verification_deadline_at, md.topics, md.preferred_slots,
+                COALESCE(pp.linkedin_verified, 0) as linkedin_verified
+         FROM profiles p
+         JOIN mentor_details md ON md.profile_id = p.id
+         LEFT JOIN professional_profiles pp ON pp.profile_id = p.id
          ORDER BY p.created_at DESC`
+      )
+      .all()
+      .map((m) => hydrateMentor(m as Record<string, unknown>));
+
+    const competitionEntries = db
+      .prepare(
+        `SELECT ce.*, p.full_name as student_name, c.title as course_title
+         FROM competition_entries ce
+         JOIN profiles p ON p.id = ce.student_id
+         JOIN courses c ON c.id = ce.course_id
+         ORDER BY COALESCE(ce.rank, 999) ASC, ce.score DESC, ce.created_at DESC
+         LIMIT 25`
       )
       .all();
 
@@ -2428,7 +4620,7 @@ export function createApiRouter() {
       )
       .all();
 
-    res.json({ pending_mentors: pendingMentors, all_mentors: allMentors, reports });
+    res.json({ pending_mentors: pendingMentors, all_mentors: allMentors, competition_entries: competitionEntries, reports });
   });
 
   router.post('/admin/mentors/:id/decision', requireAuth, requireAdmin, (req, res) => {
@@ -2465,6 +4657,55 @@ export function createApiRouter() {
     }
 
     res.json({ ok: true, status });
+  });
+
+  router.post('/admin/competitions/:entryId/evaluate', requireAuth, (req: AuthenticatedRequest, res) => {
+    if (req.userRole !== 'admin' && req.userRole !== 'mentor') {
+      res.status(403).json({ error: 'Only admins or verified mentors can score competition entries.' });
+      return;
+    }
+    if (req.userRole === 'mentor') {
+      const md = db.prepare(`SELECT status FROM mentor_details WHERE profile_id = ?`).get(req.userId!) as
+        | { status: string }
+        | undefined;
+      if (!md || md.status !== 'approved') {
+        res.status(403).json({ error: 'Pending mentors cannot score competition entries yet.' });
+        return;
+      }
+    }
+
+    const { score, status, rank, mentor_feedback } = req.body || {};
+    const entry = db.prepare(`SELECT * FROM competition_entries WHERE id = ?`).get(req.params.entryId) as
+      | Record<string, unknown>
+      | undefined;
+    if (!entry) {
+      res.status(404).json({ error: 'Competition entry not found.' });
+      return;
+    }
+
+    const numericScore = Math.max(0, Math.min(100, Number(score ?? entry.score ?? 85)));
+    const nextStatus = ['winner', 'top_5', 'honours_awarded', 'confirmed'].includes(status)
+      ? status
+      : numericScore >= 95
+        ? 'winner'
+        : numericScore >= 85
+          ? 'top_5'
+          : 'honours_awarded';
+    const nextRank = rank !== undefined && rank !== null ? Number(rank) : nextStatus === 'winner' ? 1 : null;
+
+    db.prepare(
+      `UPDATE competition_entries
+       SET score = ?, status = ?, rank = COALESCE(?, rank), mentor_feedback = COALESCE(?, mentor_feedback)
+       WHERE id = ?`
+    ).run(
+      numericScore,
+      nextStatus,
+      nextRank,
+      mentor_feedback ? String(mentor_feedback).trim() : null,
+      entry.id
+    );
+
+    res.json({ ok: true, score: numericScore, status: nextStatus, rank: nextRank });
   });
 
   router.post('/reports', requireAuth, (req: AuthenticatedRequest, res) => {

@@ -185,7 +185,7 @@ export async function sendVerificationEmail(
   code: string
 ): Promise<{ sentViaSmtp: boolean }> {
   if (!isSmtpConfigured()) {
-    console.log(`[Outspace Email Verification] Code for ${toEmail}: ${code}`);
+    console.log(`[Outpase Email Verification] Code for ${toEmail}: ${code}`);
     return { sentViaSmtp: false };
   }
 
@@ -202,19 +202,19 @@ export async function sendVerificationEmail(
   });
 
   await transporter.sendMail({
-    from: process.env.SMTP_FROM || `"Outspace Pakistan" <${process.env.SMTP_USER}>`,
+    from: process.env.SMTP_FROM || `"Outpase Pakistan" <${process.env.SMTP_USER}>`,
     to: toEmail,
-    subject: `${code} is your Outspace verification code`,
-    text: `Salam ${fullName},\n\nYour Outspace verification code is: ${code}\n\nThis code expires in 15 minutes. If you did not create an account on Outspace, you can safely ignore this email.`,
+    subject: `${code} is your Outpase verification code`,
+    text: `Salam ${fullName},\n\nYour Outpase verification code is: ${code}\n\nThis code expires in 15 minutes. If you did not create an account on Outpase, you can safely ignore this email.`,
     html: `
       <div style="font-family: Arial, sans-serif; background:#FFF5E8; padding:28px; color:#252020;">
         <div style="max-width:480px; margin:0 auto; background:#ffffff; border:2px solid #252020; border-radius:16px; padding:24px;">
-          <h2 style="margin:0 0 8px; color:#C83D42;">Verify your Outspace account</h2>
+          <h2 style="margin:0 0 8px; color:#C83D42;">Verify your Outpase account</h2>
           <p style="margin:0 0 18px; font-size:14px;">Salam ${fullName}, enter this 6-digit verification code to confirm your email address:</p>
           <div style="background:#F6D66D; border:2px solid #252020; border-radius:12px; padding:14px; text-align:center; font-size:28px; font-weight:bold; letter-spacing:6px;">
             ${code}
           </div>
-          <p style="margin:16px 0 0; font-size:12px; color:#5A4F4F;">Expires in 15 minutes · Outspace Career Exploration Platform</p>
+          <p style="margin:16px 0 0; font-size:12px; color:#5A4F4F;">Expires in 15 minutes · Outpase Career Exploration Platform</p>
         </div>
       </div>
     `,

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, GraduationCap, Building2, Banknote, Users, BookOpen, ArrowRight } from 'lucide-react';
+import { ArrowLeft, GraduationCap, Building2, Banknote, Users, BookOpen, ExternalLink } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { Avatar, EmptyStateArt, NicheIcon, Starburst, VerifiedIcon } from '../components/BrandMark';
 import { apiFetch } from '../lib/api';
@@ -15,11 +15,21 @@ interface CareerDetailPayload {
     profession: string;
     company: string | null;
     city: string | null;
+    linkedin_url?: string;
     avg_reply_hours: number | null;
     rating: number | null;
   }>;
   groups: Array<{ id: string; name: string; description: string; members_count: number; mentor_name: string }>;
-  quizzes: Array<{ id: string; title: string; description: string; author_name: string }>;
+  courses: Array<{
+    id: string;
+    title: string;
+    subtitle: string;
+    author_name: string;
+    duration_label: string;
+    module_count: number;
+    is_coming_soon: number | boolean;
+    competition_title: string;
+  }>;
 }
 
 export default function CareerDetailPage() {
@@ -127,16 +137,15 @@ export default function CareerDetailPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {data.mentors.map((m) => (
-                  <Link
+                  <div
                     key={m.id}
-                    to={`/u/${m.id}`}
-                    className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 hover:-translate-y-0.5 transition-transform flex items-center justify-between gap-3"
+                    className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 hover:-translate-y-0.5 transition-transform flex flex-col justify-between gap-3"
                   >
-                    <div className="flex items-center gap-3.5 min-w-0">
+                    <Link to={`/u/${m.id}`} className="flex items-center gap-3.5 min-w-0">
                       <Avatar src={m.avatar_url} name={m.full_name} size="md" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-display font-bold text-sm truncate">{m.full_name}</span>
+                          <span className="font-display font-bold text-sm truncate hover:underline">{m.full_name}</span>
                           <VerifiedIcon />
                         </div>
                         <div className="text-xs text-[#4D4242] truncate">
@@ -145,15 +154,31 @@ export default function CareerDetailPage() {
                         </div>
                         <div className="text-xs text-[#6B5E5E] mt-1 tabular-nums">{formatReplyTime(m.avg_reply_hours)}</div>
                       </div>
+                    </Link>
+
+                    <div className="pt-2.5 border-t border-[#252020]/10 flex items-center justify-between text-xs font-bold">
+                      <Link to={`/u/${m.id}`} className="text-[#252020] hover:text-[#C83D42]">
+                        Passport →
+                      </Link>
+                      {m.linkedin_url && (
+                        <a
+                          href={m.linkedin_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[#C83D42] hover:underline"
+                        >
+                          <span>LinkedIn</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
                     </div>
-                    <ArrowRight className="w-4 h-4 text-[#C83D42] shrink-0" />
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}
           </section>
 
-          {/* Groups & Quizzes */}
+          {/* Groups & Video Courses */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <section className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-6 space-y-4">
               <div className="flex items-center gap-2 font-display text-lg font-bold">
@@ -183,20 +208,35 @@ export default function CareerDetailPage() {
             <section className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-6 space-y-4">
               <div className="flex items-center gap-2 font-display text-lg font-bold">
                 <BookOpen className="w-5 h-5 text-[#C83D42]" />
-                <span>Skill &amp; Reality Check Quizzes</span>
+                <span>Video Courses &amp; Monthly Competition</span>
               </div>
-              {data.quizzes.length === 0 ? (
-                <p className="text-sm text-[#5A4F4F]">No mentor quizzes for this niche yet.</p>
+              {!data.courses?.length ? (
+                <div className="p-4 rounded-xl bg-[#FFF5E8] border-2 border-dashed border-[#252020]/30 space-y-2">
+                  <div className="font-display font-bold text-sm">Video Curriculum Coming Soon</div>
+                  <p className="text-xs text-[#5A4F4F]">
+                    Courses &amp; competitions for {data.niche.name} are launching next. Explore active video tracks in Entrepreneurship, Psychology, and Social Impact right now.
+                  </p>
+                  <Link to="/courses" className="inline-block text-xs font-bold text-[#C83D42] hover:underline">
+                    Browse Active Courses →
+                  </Link>
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {data.quizzes.map((q) => (
+                  {data.courses.map((c) => (
                     <Link
-                      key={q.id}
-                      to={`/quizzes/${q.id}`}
-                      className="block p-4 rounded-xl bg-[#F6D66D]/30 border-2 border-[#252020]/20 hover:border-[#252020] transition-colors"
+                      key={c.id}
+                      to={`/courses/${c.id}`}
+                      className="block p-4 rounded-xl bg-[#F6D66D]/35 border-2 border-[#252020]/25 hover:border-[#252020] transition-colors"
                     >
-                      <div className="font-display font-bold text-sm">{q.title}</div>
-                      <div className="text-xs text-[#5A4F4F] mt-0.5">By {q.author_name}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-display font-bold text-sm">{c.title}</span>
+                        <span className="text-[11px] font-mono font-bold text-[#C83D42] shrink-0">
+                          {c.is_coming_soon ? 'Coming Soon' : `${c.module_count} Videos`}
+                        </span>
+                      </div>
+                      <div className="text-xs text-[#5A4F4F] mt-1">
+                        Led by {c.author_name} · {c.competition_title}
+                      </div>
                     </Link>
                   ))}
                 </div>

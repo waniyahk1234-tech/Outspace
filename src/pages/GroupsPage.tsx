@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Users, Plus, HelpCircle, MessageSquare, ArrowLeft, BadgeCheck } from 'lucide-react';
+import { Users, Plus, HelpCircle, MessageSquare, ArrowLeft, BadgeCheck, Video, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '../components/AppShell';
 import { Avatar, EmptyStateArt, Starburst } from '../components/BrandMark';
 import { apiFetch, useAuth } from '../lib/api';
-import { formatPKT, type Niche } from '../shared/types';
+import { formatPKT, type GroupQASession, type Niche } from '../shared/types';
 
 interface GroupSummary {
   id: string;
@@ -232,19 +232,29 @@ export function GroupsListPage() {
 
 export function GroupDetailPage() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [group, setGroup] = useState<GroupSummary | null>(null);
   const [posts, setPosts] = useState<GroupPost[]>([]);
+  const [seminars, setSeminars] = useState<GroupQASession[]>([]);
   const [body, setBody] = useState('');
   const [isQuestion, setIsQuestion] = useState(true);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState('');
 
+  // Host Monthly Group Q&A Modal
+  const [showQnaModal, setShowQnaModal] = useState(false);
+  const [qnaTopic, setQnaTopic] = useState('');
+  const [qnaDate, setQnaDate] = useState(() => new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString().slice(0, 10));
+  const [qnaTime, setQnaTime] = useState('19:00');
+  const [submittingQna, setSubmittingQna] = useState(false);
+
   const load = useCallback(() => {
     if (!id) return;
-    apiFetch<{ group: GroupSummary; posts: GroupPost[] }>(`/api/groups/${id}`)
+    apiFetch<{ group: GroupSummary; posts: GroupPost[]; seminars?: GroupQASession[] }>(`/api/groups/${id}`)
       .then((d) => {
         setGroup(d.group);
         setPosts(d.posts);
+        setSeminars(d.seminars || []);
       })
       .catch(() => {});
   }, [id]);
@@ -252,6 +262,45 @@ export function GroupDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const isApprovedMentor = user?.role === 'mentor' && user.mentor_details?.status === 'approved';
+
+  const scheduleQna = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    setSubmittingQna(true);
+    try {
+      const isoPKT = `${qnaDate}T${qnaTime}:00+05:00`;
+      await apiFetch(`/api/groups/${id}/seminars`, {
+        method: 'POST',
+        body: JSON.stringify({
+          topic: qnaTopic,
+          start_at: new Date(isoPKT).toISOString(),
+          duration_minutes: 60,
+        }),
+      });
+      toast.success('Monthly Group Q&A scheduled & Google Meet link ready!');
+      setShowQnaModal(false);
+      setQnaTopic('');
+      load();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSubmittingQna(false);
+    }
+  };
+
+  const toggleSeminarRsvp = async (meetingId: string) => {
+    try {
+      const res = await apiFetch<{ ok: boolean; has_rsvped: boolean }>(`/api/groups/seminars/${meetingId}/rsvp`, {
+        method: 'POST',
+      });
+      toast.success(res.has_rsvped ? 'RSVP confirmed for Group Q&A!' : 'RSVP removed.');
+      load();
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
 
   const join = async () => {
     if (!id) return;
@@ -341,6 +390,141 @@ export function GroupDetailPage() {
               )}
             </div>
           </div>
+
+          {/* Monthly Group Q&A Live Sessions */}
+          <section className="bg-[#FFF5E8] rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 font-display text-lg font-bold">
+                  <Video className="w-5 h-5 text-[#C83D42]" />
+                  <span>Monthly Group Q&amp;A Sessions</span>
+                </div>
+                <p className="text-xs text-[#5A4F4F] mt-0.5">
+                  Verified mentors host at least once a month to answer repetitive questions together — free for all students.
+                </p>
+              </div>
+              {isApprovedMentor && (
+                <button
+                  type="button"
+                  onClick={() => setShowQnaModal(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold hover:bg-[#B23237] whitespace-nowrap self-start"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Host Monthly Q&amp;A</span>
+                </button>
+              )}
+            </div>
+
+            {seminars.length === 0 ? (
+              <p className="text-xs text-[#6B5E5E]">No live Group Q&amp;A sessions scheduled yet this month.</p>
+            ) : (
+              <div className="space-y-3">
+                {seminars.map((sem) => (
+                  <div
+                    key={sem.id}
+                    className="bg-white rounded-xl border-2 border-[#252020] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="font-display font-bold text-sm">{sem.topic}</div>
+                      <div className="text-xs text-[#5A4F4F] flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span>Hosted by <strong>{sem.mentor_name}</strong></span>
+                        <span>·</span>
+                        <span className="inline-flex items-center gap-1 font-mono">
+                          <Calendar className="w-3 h-3 text-[#C83D42]" />
+                          {sem.start_at ? formatPKT(sem.start_at) : 'Monthly Live'}
+                        </span>
+                        <span>·</span>
+                        <span className="tabular-nums font-semibold">{sem.rsvp_count} attending</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => toggleSeminarRsvp(sem.id)}
+                        className={`px-3.5 py-2 rounded-xl border-2 border-[#252020] text-xs font-bold ${
+                          sem.has_rsvped ? 'bg-[#F6D66D] text-[#252020]' : 'bg-white hover:bg-[#FFF5E8]'
+                        }`}
+                      >
+                        {sem.has_rsvped ? 'Going ✓' : 'RSVP'}
+                      </button>
+                      <a
+                        href={sem.meet_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold hover:bg-[#B23237]"
+                      >
+                        <Video className="w-3.5 h-3.5" />
+                        <span>Join Meet</span>
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {showQnaModal && (
+            <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
+              <form
+                onSubmit={scheduleQna}
+                className="bg-white rounded-3xl border-2 border-[#252020] editorial-shadow max-w-md w-full p-6 space-y-4"
+              >
+                <h3 className="font-display text-xl font-bold">Schedule Monthly Group Q&amp;A</h3>
+                <p className="text-xs text-[#5A4F4F]">
+                  Answer students&apos; recurring career, portfolio, and admissions questions together in a 1-hour Google Meet.
+                </p>
+                <div>
+                  <label className="block text-xs font-bold mb-1">Q&amp;A Topic *</label>
+                  <input
+                    required
+                    value={qnaTopic}
+                    onChange={(e) => setQnaTopic(e.target.value)}
+                    placeholder="e.g. Monthly Q&A: CS Admissions, Internships & First Projects"
+                    className="w-full px-3.5 py-2.5 rounded-xl border-2 border-[#252020]/35 text-sm focus:outline-none focus:border-[#252020]"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={qnaDate}
+                      onChange={(e) => setQnaDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border-2 border-[#252020]/35 text-sm focus:outline-none focus:border-[#252020]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1">Time (PKT) *</label>
+                    <input
+                      type="time"
+                      required
+                      value={qnaTime}
+                      onChange={(e) => setQnaTime(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border-2 border-[#252020]/35 text-sm focus:outline-none focus:border-[#252020]"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowQnaModal(false)}
+                    className="px-4 py-2 rounded-xl border-2 border-[#252020] text-xs font-bold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingQna}
+                    className="px-4 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    {submittingQna ? 'Scheduling...' : 'Publish Group Q&A'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           {group.is_member && (
             <form

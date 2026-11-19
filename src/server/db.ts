@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { TEDX_SPEAKER_MENTORS } from './speakersSeed.js';
+import { FLAGSHIP_COURSES_SEED } from './coursesSeed.js';
 
 function resolveDbPath(): string {
   if (process.env.VERCEL || process.env.VERCEL_ENV) {
@@ -28,6 +30,7 @@ export function getDb(): Database.Database {
     dbInstance.pragma('foreign_keys = ON');
     initSchema(dbInstance);
     seedIfEmpty(dbInstance);
+    ensureFlagshipSpeakersAndCourses(dbInstance);
   }
   return dbInstance;
 }
@@ -77,11 +80,36 @@ function initSchema(db: Database.Database) {
       company TEXT,
       years_experience INTEGER,
       linkedin_url TEXT NOT NULL,
+      talk_url TEXT,
       niches TEXT NOT NULL DEFAULT '[]',
+      topics TEXT NOT NULL DEFAULT '[]',
+      preferred_slots TEXT NOT NULL DEFAULT '[]',
+      auto_welcome_message TEXT,
+      vip_code TEXT,
+      vip_partner TEXT,
+      verification_submitted_at TEXT,
+      verification_deadline_at TEXT,
+      is_demo INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
       avg_reply_hours REAL,
       rating REAL,
       sessions_completed INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS professional_profiles (
+      profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+      linkedin_sub TEXT UNIQUE,
+      linkedin_email TEXT,
+      linkedin_verified INTEGER NOT NULL DEFAULT 0,
+      linkedin_profile_url TEXT,
+      headline TEXT,
+      current_role TEXT,
+      organization TEXT,
+      industry TEXT,
+      locale TEXT,
+      raw_oidc_profile TEXT NOT NULL DEFAULT '{}',
+      synced_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS niches (
@@ -243,6 +271,101 @@ function initSchema(db: Database.Database) {
       blocked_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
       PRIMARY KEY (blocker_id, blocked_id)
     );
+
+    CREATE TABLE IF NOT EXISTS courses (
+      id TEXT PRIMARY KEY,
+      niche_slug TEXT NOT NULL,
+      author_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      subtitle TEXT NOT NULL,
+      description TEXT NOT NULL,
+      duration_label TEXT NOT NULL,
+      is_coming_soon INTEGER NOT NULL DEFAULT 0,
+      competition_title TEXT NOT NULL,
+      competition_brief TEXT NOT NULL,
+      meetup_title TEXT NOT NULL,
+      meetup_venue TEXT NOT NULL,
+      meetup_date_label TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS course_modules (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      speaker_name TEXT NOT NULL,
+      speaker_role TEXT NOT NULL,
+      duration_seconds INTEGER NOT NULL,
+      video_url TEXT,
+      summary TEXT NOT NULL,
+      key_takeaways TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE TABLE IF NOT EXISTS course_progress (
+      student_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      module_id TEXT NOT NULL REFERENCES course_modules(id) ON DELETE CASCADE,
+      completed_at TEXT NOT NULL,
+      PRIMARY KEY (student_id, module_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS competition_entries (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      cycle_month TEXT NOT NULL,
+      pitch_title TEXT NOT NULL,
+      problem_statement TEXT NOT NULL,
+      solution_summary TEXT NOT NULL,
+      pitch_link TEXT,
+      in_person_rsvp INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'confirmed',
+      rank INTEGER,
+      score INTEGER NOT NULL DEFAULT 0,
+      mentor_feedback TEXT,
+      certificate_id TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE (course_id, student_id, cycle_month)
+    );
+
+    CREATE TABLE IF NOT EXISTS course_assignments (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      submission_type TEXT NOT NULL CHECK (submission_type IN ('video', 'presentation')),
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      asset_url TEXT NOT NULL,
+      score INTEGER NOT NULL DEFAULT 85,
+      created_at TEXT NOT NULL,
+      UNIQUE (course_id, student_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS mentor_follows (
+      mentor_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (mentor_id, student_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS mentor_updates (
+      id TEXT PRIMARY KEY,
+      mentor_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('update', 'masterclass', 'cohort')),
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      media_url TEXT,
+      event_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS group_seminar_rsvps (
+      meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (meeting_id, student_id)
+    );
   `);
 
   // Safe migration for pre-existing local SQLite databases
@@ -257,6 +380,47 @@ function initSchema(db: Database.Database) {
   }
   if (!authCols.includes('provider_id')) {
     db.exec(`ALTER TABLE auth_users ADD COLUMN provider_id TEXT;`);
+  }
+
+  const mentorCols = (db.prepare(`PRAGMA table_info(mentor_details)`).all() as Array<{ name: string }>).map(
+    (c) => c.name
+  );
+  if (!mentorCols.includes('talk_url')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN talk_url TEXT;`);
+  }
+  if (!mentorCols.includes('topics')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN topics TEXT NOT NULL DEFAULT '[]';`);
+  }
+  if (!mentorCols.includes('preferred_slots')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN preferred_slots TEXT NOT NULL DEFAULT '[]';`);
+  }
+  if (!mentorCols.includes('auto_welcome_message')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN auto_welcome_message TEXT;`);
+  }
+  if (!mentorCols.includes('vip_code')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN vip_code TEXT;`);
+  }
+  if (!mentorCols.includes('vip_partner')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN vip_partner TEXT;`);
+  }
+  if (!mentorCols.includes('verification_submitted_at')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN verification_submitted_at TEXT;`);
+  }
+  if (!mentorCols.includes('verification_deadline_at')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN verification_deadline_at TEXT;`);
+  }
+  if (!mentorCols.includes('is_demo')) {
+    db.exec(`ALTER TABLE mentor_details ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0;`);
+  }
+
+  const compCols = (db.prepare(`PRAGMA table_info(competition_entries)`).all() as Array<{ name: string }>).map(
+    (c) => c.name
+  );
+  if (!compCols.includes('rank')) {
+    db.exec(`ALTER TABLE competition_entries ADD COLUMN rank INTEGER;`);
+  }
+  if (!compCols.includes('score')) {
+    db.exec(`ALTER TABLE competition_entries ADD COLUMN score INTEGER NOT NULL DEFAULT 0;`);
   }
 }
 
@@ -494,7 +658,7 @@ function seedIfEmpty(db: Database.Database) {
       'admin',
       'Faisal Qureshi',
       null,
-      'Outspace Trust & Mentor Verification Lead.',
+      'Outpase Trust & Mentor Verification Lead.',
       'Karachi',
       null,
       null,
@@ -1312,6 +1476,485 @@ function seedIfEmpty(db: Database.Database) {
       mq.questions.forEach((item, idx) => {
         insertQ.run(uuid(), mq.id, idx + 1, item.q, JSON.stringify(item.opts), item.correct);
       });
+    }
+  });
+
+  tx();
+}
+
+export function getCurrentCycleMonth(): string {
+  const pktNow = new Date(Date.now() + 5 * 3600 * 1000);
+  return `${pktNow.getUTCFullYear()}-${String(pktNow.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function ensureFlagshipSpeakersAndCourses(db: Database.Database) {
+  const now = new Date();
+  const iso = (d: Date) => d.toISOString();
+  const hoursAgo = (h: number) => new Date(now.getTime() - h * 3600 * 1000).toISOString();
+  const daysFromNow = (d: number, hourPKT: number, min = 0) => {
+    const target = new Date(now.getTime() + d * 24 * 3600 * 1000);
+    target.setUTCHours(hourPKT - 5, min, 0, 0);
+    return target;
+  };
+  const demoPasswordHash = bcrypt.hashSync('Demo@1234', 10);
+
+  const tx = db.transaction(() => {
+    // 1. Ensure Social Impact flagship niche exists
+    db.prepare(
+      `INSERT OR IGNORE INTO niches (id, slug, name, description, day_in_life, salary_range_pkr, degrees, universities, riasec_codes, icon)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      '90000000-0000-4000-8000-000000000011',
+      'social-impact',
+      'Social Impact & Inclusion',
+      'Lead education reform, disability accessibility tech, climate action, and non-profit ventures across Pakistan.',
+      'Meet communities in Karachi or rural Sindh, design inclusive grassroots programs, measure real social outcomes, and pitch funders or policy partners.',
+      'PKR 75k–400k / month',
+      JSON.stringify(['BS Development Studies', 'BS Public Policy', 'BS Social Sciences & Liberal Arts']),
+      JSON.stringify(['IBA Karachi', 'LUMS', 'Habib University', 'SZABIST']),
+      JSON.stringify(['S', 'E']),
+      'HeartHandshake'
+    );
+
+    // 2. Insert/ensure all 40 TEDx speakers & industry mentors (showcase is_demo = 1)
+    const insertUser = db.prepare(
+      `INSERT OR IGNORE INTO auth_users (id, email, password_hash, email_verified, auth_provider, created_at) VALUES (?, ?, ?, 1, 'local', ?)`
+    );
+    const insertProfile = db.prepare(
+      `INSERT OR IGNORE INTO profiles (id, role, full_name, avatar_url, bio, city, grade_level, school_name, interests, guardian_consent, onboarding_complete, created_at)
+       VALUES (?, 'mentor', ?, NULL, ?, ?, NULL, NULL, ?, 1, 1, ?)`
+    );
+    const insertMentor = db.prepare(
+      `INSERT OR IGNORE INTO mentor_details (profile_id, profession, company, years_experience, linkedin_url, talk_url, niches, topics, preferred_slots, auto_welcome_message, vip_partner, is_demo, status, avg_reply_hours, rating, sessions_completed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Outpase Speaker Partner', 1, 'approved', ?, ?, ?)`
+    );
+
+    for (const s of TEDX_SPEAKER_MENTORS) {
+      const derivedTopics = [s.profession.split('&')[0].trim(), `${s.niches[0]?.replace(/-/g, ' ')} roadmaps`, 'Career & university transitions'];
+      const defaultWelcome = `Assalam-o-Alaikum! Thanks for completing a course and reaching out with such a thoughtful question. Happy to connect with you — feel free to follow up here or join my monthly Group Q&A! — ${s.name}`;
+      insertUser.run(s.id, s.email, demoPasswordHash, iso(now));
+      insertProfile.run(s.id, s.name, s.bio, s.city, JSON.stringify(s.niches), iso(now));
+      insertMentor.run(
+        s.id,
+        s.profession,
+        s.company,
+        s.years,
+        s.linkedin,
+        s.talk_url || null,
+        JSON.stringify(s.niches),
+        JSON.stringify(derivedTopics),
+        JSON.stringify(['Wednesday 7:00 PM PKT', 'Saturday 4:00 PM PKT']),
+        defaultWelcome,
+        s.avg_reply_hours,
+        s.rating,
+        s.sessions_completed
+      );
+    }
+
+    // Ensure mentor@demo.com & pending.mentor@demo.com have topics/slots/48h fields populated cleanly
+    db.prepare(
+      `UPDATE mentor_details
+       SET topics = CASE WHEN topics = '[]' OR topics IS NULL THEN ? ELSE topics END,
+           preferred_slots = CASE WHEN preferred_slots = '[]' OR preferred_slots IS NULL THEN ? ELSE preferred_slots END,
+           auto_welcome_message = COALESCE(auto_welcome_message, ?),
+           vip_code = COALESCE(vip_code, 'NIC-VIP-2026'),
+           vip_partner = COALESCE(vip_partner, 'NIC Pakistan'),
+           is_demo = 0
+       WHERE profile_id = '10000000-0000-4000-8000-000000000001'`
+    ).run(
+      JSON.stringify(['React & TypeScript', 'CS Admissions (NUST/FAST/LUMS)', 'First Engineering Internships']),
+      JSON.stringify(['Tuesday 7:00 PM PKT', 'Thursday 8:00 PM PKT', 'Saturday 5:00 PM PKT']),
+      'Assalam-o-Alaikum! Thank you for completing your Outpase course first. Your structured note is great — feel free to share your assignment link or ask about FAST/NUST/LUMS CS prep here.'
+    );
+
+    const pendingDeadline = new Date(now.getTime() + 46 * 3600 * 1000).toISOString();
+    db.prepare(
+      `UPDATE mentor_details
+       SET topics = CASE WHEN topics = '[]' OR topics IS NULL THEN ? ELSE topics END,
+           preferred_slots = CASE WHEN preferred_slots = '[]' OR preferred_slots IS NULL THEN ? ELSE preferred_slots END,
+           verification_submitted_at = COALESCE(verification_submitted_at, ?),
+           verification_deadline_at = COALESCE(verification_deadline_at, ?),
+           is_demo = 0
+       WHERE profile_id = '10000000-0000-4000-8000-000000000011'`
+    ).run(
+      JSON.stringify(['Embedded Systems & IoT', 'Robotics Competitions', 'Applied Machine Learning']),
+      JSON.stringify(['Monday 6:00 PM PKT', 'Friday 7:00 PM PKT']),
+      hoursAgo(2),
+      pendingDeadline
+    );
+
+    // 3. Ensure every approved mentor has at least 3 open upcoming PKT slots
+    const approvedMentors = db
+      .prepare(`SELECT profile_id FROM mentor_details WHERE status = 'approved'`)
+      .all() as Array<{ profile_id: string }>;
+    const countOpenSlots = db.prepare(
+      `SELECT COUNT(*) as c FROM availability WHERE mentor_id = ? AND is_booked = 0 AND start_at > ?`
+    );
+    const insertSlot = db.prepare(
+      `INSERT INTO availability (id, mentor_id, start_at, end_at, is_booked) VALUES (?, ?, ?, ?, 0)`
+    );
+
+    for (const m of approvedMentors) {
+      const openCount = (countOpenSlots.get(m.profile_id, iso(now)) as { c: number }).c;
+      if (openCount === 0) {
+        for (const [idx, dayOffset] of [1, 2, 4].entries()) {
+          const start = daysFromNow(dayOffset, 16 + idx, 0);
+          const end = new Date(start.getTime() + 45 * 60 * 1000);
+          insertSlot.run(uuid(), m.profile_id, iso(start), iso(end));
+        }
+      }
+    }
+
+    // 4. Ensure Flagship Track Groups exist for Entrepreneurship, Psychology, and Social Impact
+    const flagshipGroups = [
+      {
+        id: '30000000-0000-4000-8000-000000000006',
+        mentor_id: '10000000-0000-4000-8000-000000000105',
+        niche_slug: 'entrepreneurship',
+        name: 'Pakistan Student Founders & NIC Circle',
+        description:
+          'Share startup ideas, get pitch feedback from NIC Karachi & BusCaro mentors, and organize meetup teams.',
+      },
+      {
+        id: '30000000-0000-4000-8000-000000000007',
+        mentor_id: '10000000-0000-4000-8000-000000000119',
+        niche_slug: 'psychology',
+        name: 'Mind & Resilience Explorers',
+        description:
+          'Discuss clinical psychology degrees, youth mental health campaigns, and overcoming academic burnout.',
+      },
+      {
+        id: '30000000-0000-4000-8000-000000000008',
+        mentor_id: '10000000-0000-4000-8000-000000000101',
+        niche_slug: 'social-impact',
+        name: 'Social Impact & Accessibility Builders',
+        description:
+          'Connect with ConnectHear, Durbeen, and TEDxIBA mentors working on education equity, climate, and inclusion.',
+      },
+    ];
+    const insertGroup = db.prepare(
+      `INSERT OR IGNORE INTO groups (id, mentor_id, niche_slug, name, description, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    for (const fg of flagshipGroups) {
+      insertGroup.run(fg.id, fg.mentor_id, fg.niche_slug, fg.name, fg.description, iso(now));
+    }
+
+    // 5. Upsert Flagship Courses + Modules
+    const insertCourse = db.prepare(
+      `INSERT OR IGNORE INTO courses (id, niche_slug, author_id, title, subtitle, description, duration_label, is_coming_soon, competition_title, competition_brief, meetup_title, meetup_venue, meetup_date_label, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const insertModule = db.prepare(
+      `INSERT OR IGNORE INTO course_modules (id, course_id, position, title, speaker_name, speaker_role, duration_seconds, video_url, summary, key_takeaways)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+
+    for (const c of FLAGSHIP_COURSES_SEED) {
+      insertCourse.run(
+        c.id,
+        c.niche_slug,
+        c.author_id,
+        c.title,
+        c.subtitle,
+        c.description,
+        c.duration_label,
+        c.is_coming_soon ? 1 : 0,
+        c.competition_title,
+        c.competition_brief,
+        c.meetup_title,
+        c.meetup_venue,
+        c.meetup_date_label,
+        iso(now)
+      );
+
+      for (const mod of c.modules) {
+        insertModule.run(
+          mod.id,
+          c.id,
+          mod.position,
+          mod.title,
+          mod.speaker_name,
+          mod.speaker_role,
+          mod.duration_seconds,
+          mod.video_url,
+          mod.summary,
+          JSON.stringify(mod.key_takeaways)
+        );
+      }
+    }
+
+    // 6. Seed starter peer cohort entries + scores/ranks + post-course assignments for Top Student Leaderboard
+    const cycleMonth = getCurrentCycleMonth();
+    const cohortSeeds = [
+      {
+        id: '60000000-0000-4000-8000-000000000001',
+        course_id: '50000000-0000-4000-8000-000000000001',
+        student_id: '20000000-0000-4000-8000-000000000008', // Saad Mehmood (#1 Winner)
+        pitch_title: 'BazaarSplit: Shared Stationery & Lab Kit Co-op for Matric Students',
+        problem_statement: 'Textbooks and science lab kits cost too much for individual students every term.',
+        solution_summary:
+          'A neighborhood school co-op app letting students swap verified kits and split bulk stationery orders with doorstep pickup.',
+        rank: 1,
+        score: 96,
+        status: 'winner',
+      },
+      {
+        id: '60000000-0000-4000-8000-000000000002',
+        course_id: '50000000-0000-4000-8000-000000000002',
+        student_id: '20000000-0000-4000-8000-000000000007', // Sana Javed (#2 Top 5)
+        pitch_title: 'SukoonBoard: Bilingual Exam Stress Check-In Circles for Inter Students',
+        problem_statement: 'Pre-board exam burnout is rarely discussed openly in Pakistani colleges.',
+        solution_summary:
+          'Weekly 25-minute peer-moderated study reflection circles paired with anonymous Urdu/English coping checklists.',
+        rank: 2,
+        score: 93,
+        status: 'top_5',
+      },
+      {
+        id: '60000000-0000-4000-8000-000000000003',
+        course_id: '50000000-0000-4000-8000-000000000003',
+        student_id: '20000000-0000-4000-8000-000000000003', // Fatima Noor (#3 Top 5)
+        pitch_title: 'SunehriRasta: Audio-Visual Science Notes for Deaf & Low-Vision Classrooms',
+        problem_statement: 'Science revision sheets in public schools lack Pakistani Sign Language and high-contrast audio guides.',
+        solution_summary:
+          'Student volunteer teams convert Matric Biology & Physics chapters into captioned PSL mini-clips for partner schools.',
+        rank: 3,
+        score: 90,
+        status: 'top_5',
+      },
+      {
+        id: '60000000-0000-4000-8000-000000000004',
+        course_id: '50000000-0000-4000-8000-000000000001',
+        student_id: '20000000-0000-4000-8000-000000000006', // Danish Kamran (#4 Top 5)
+        pitch_title: 'CampusMeter: Solar Micro-Kiosk & Phone Charging for Rural Tuition Centers',
+        problem_statement: 'Load-shedding disrupts evening exam prep across outer Karachi & interior Sindh.',
+        solution_summary:
+          'Low-cost student-operated solar battery bank leased per evening session with JazzCash micro-payments.',
+        rank: 4,
+        score: 87,
+        status: 'top_5',
+      },
+      {
+        id: '60000000-0000-4000-8000-000000000005',
+        course_id: '50000000-0000-4000-8000-000000000003',
+        student_id: '20000000-0000-4000-8000-000000000005', // Mahnoor Azhar (#5 Top 5)
+        pitch_title: 'SadaaTransit: Tactile Bus-Stop Route Cards for Visually Impaired Commuters',
+        problem_statement: 'Bus routes in Lahore lack tactile or audio route indicators for blind commuters.',
+        solution_summary:
+          'Embossed waterproof route sleeves paired with free QR Urdu voice guides co-designed with Punjab transit.',
+        rank: 5,
+        score: 84,
+        status: 'top_5',
+      },
+      {
+        id: '60000000-0000-4000-8000-000000000006',
+        course_id: '50000000-0000-4000-8000-000000000001',
+        student_id: '20000000-0000-4000-8000-000000000004', // Zain ul Abidin (#6)
+        pitch_title: 'HisaabBook Teen: Pocket Allowance & Bookkeeping Helper for Students',
+        problem_statement: 'High-school clubs struggle to reconcile bake-sale and event budgets transparently.',
+        solution_summary:
+          'Simple two-column mobile ledger template tailored for school society treasurers.',
+        rank: 6,
+        score: 78,
+        status: 'confirmed',
+      },
+    ];
+
+    const insertEntry = db.prepare(
+      `INSERT OR IGNORE INTO competition_entries (id, course_id, student_id, cycle_month, pitch_title, problem_statement, solution_summary, pitch_link, in_person_rsvp, status, rank, score, mentor_feedback, certificate_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?, ?, 'Strong local insight—evaluated by Outpase track mentors.', NULL, ?)`
+    );
+    const updateEntryScore = db.prepare(
+      `UPDATE competition_entries SET rank = COALESCE(rank, ?), score = CASE WHEN score = 0 THEN ? ELSE score END, status = CASE WHEN status = 'confirmed' THEN ? ELSE status END WHERE id = ?`
+    );
+    for (const ce of cohortSeeds) {
+      insertEntry.run(
+        ce.id,
+        ce.course_id,
+        ce.student_id,
+        cycleMonth,
+        ce.pitch_title,
+        ce.problem_statement,
+        ce.solution_summary,
+        ce.status,
+        ce.rank,
+        ce.score,
+        iso(now)
+      );
+      updateEntryScore.run(ce.rank, ce.score, ce.status, ce.id);
+    }
+
+    // 7. Seed Post-Course Assignments (video & presentation submissions) so Leaderboard & Student Profiles are inspectable immediately
+    const assignmentSeeds = [
+      {
+        id: '70000000-0000-4000-8000-000000000001',
+        course_id: '50000000-0000-4000-8000-000000000001',
+        student_id: '20000000-0000-4000-8000-000000000008', // Saad Mehmood
+        submission_type: 'presentation',
+        title: 'BazaarSplit 10-Slide Unit Economics & School Pilot Deck',
+        summary: 'Surveyed 64 Matric parents in Lahore, mapped 18% bulk stationery savings, and modeled campus ambassador logistics.',
+        asset_url: 'https://docs.google.com/presentation/d/outspace-bazaarsplit-deck',
+        score: 96,
+      },
+      {
+        id: '70000000-0000-4000-8000-000000000002',
+        course_id: '50000000-0000-4000-8000-000000000002',
+        student_id: '20000000-0000-4000-8000-000000000007', // Sana Javed
+        submission_type: 'video',
+        title: '3-Minute Urdu/English Peer Counseling Roleplay & Field Brief',
+        summary: 'Demonstrated active-listening de-escalation protocol for pre-board exam anxiety tested with 15 Fazaia Inter classmates.',
+        asset_url: 'https://youtu.be/dQw4w9WgXcQ',
+        score: 93,
+      },
+      {
+        id: '70000000-0000-4000-8000-000000000003',
+        course_id: '50000000-0000-4000-8000-000000000003',
+        student_id: '20000000-0000-4000-8000-000000000003', // Fatima Noor
+        submission_type: 'presentation',
+        title: 'SunehriRasta PSL Science Accessibility Prototype Deck',
+        summary: '12-slide accessibility breakdown interviewing two special-education teachers in Islamabad and scripting captioned Physics lessons.',
+        asset_url: 'https://docs.google.com/presentation/d/outspace-sunehrirasta-deck',
+        score: 90,
+      },
+      {
+        id: '70000000-0000-4000-8000-000000000004',
+        course_id: '50000000-0000-4000-8000-000000000001',
+        student_id: '20000000-0000-4000-8000-000000000006', // Danish Kamran
+        submission_type: 'video',
+        title: 'CampusMeter Solar Micro-Kiosk Hardware Walkthrough (2m 45s)',
+        summary: 'Walked through 12V LiFePO4 bill of materials, break-even pricing in PKR, and tuition center pilot feedback.',
+        asset_url: 'https://youtu.be/M7lc1UVf-VE',
+        score: 87,
+      },
+      {
+        id: '70000000-0000-4000-8000-000000000005',
+        course_id: '50000000-0000-4000-8000-000000000003',
+        student_id: '20000000-0000-4000-8000-000000000005', // Mahnoor Azhar
+        submission_type: 'presentation',
+        title: 'SadaaTransit Orange Line Wayfinding Figma & Tactile Case Study',
+        summary: 'Field audit of 4 Lahore transit stops with high-contrast tactile card prototypes and bilingual audio QR flows.',
+        asset_url: 'https://docs.google.com/presentation/d/outspace-sadaatransit-study',
+        score: 84,
+      },
+      {
+        id: '70000000-0000-4000-8000-000000000006',
+        course_id: '50000000-0000-4000-8000-000000000001',
+        student_id: '20000000-0000-4000-8000-000000000004', // Zain ul Abidin
+        submission_type: 'presentation',
+        title: 'HisaabBook Teen School Society Ledger Showcase',
+        summary: 'Sample Google Sheets + cash-flow breakdown for high school science Olympiad budgeting.',
+        asset_url: 'https://docs.google.com/presentation/d/outspace-hisaabbook-deck',
+        score: 78,
+      },
+    ];
+
+    const insertAssignment = db.prepare(
+      `INSERT OR IGNORE INTO course_assignments (id, course_id, student_id, submission_type, title, summary, asset_url, score, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const a of assignmentSeeds) {
+      insertAssignment.run(
+        a.id,
+        a.course_id,
+        a.student_id,
+        a.submission_type,
+        a.title,
+        a.summary,
+        a.asset_url,
+        a.score,
+        hoursAgo(12)
+      );
+    }
+
+    // 8. Seed Mentor Updates (Masterclasses, Updates & Upcoming Cohorts) for free/unverified follow feed
+    const mentorUpdatesSeed = [
+      {
+        id: '80000000-0000-4000-8000-000000000001',
+        mentor_id: '10000000-0000-4000-8000-000000000001', // Ayesha Khan
+        kind: 'masterclass',
+        title: 'Masterclass: How Pakistani High-Schoolers Land Engineering Portfolios',
+        body: 'Watch my 18-minute walkthrough on turning A-Level & Matric class projects into deployable TypeScript apps recruiters actually open.',
+        media_url: 'https://youtu.be/M7lc1UVf-VE',
+        event_at: null,
+      },
+      {
+        id: '80000000-0000-4000-8000-000000000002',
+        mentor_id: '10000000-0000-4000-8000-000000000001',
+        kind: 'cohort',
+        title: 'Upcoming Cohort: Tech Explorers Monthly Live Q&A',
+        body: 'Hosting our monthly group Q&A on FAST vs NUST vs LUMS admissions and hackathon teamwork. Open to all following students — no prior course needed to listen in!',
+        media_url: null,
+        event_at: iso(daysFromNow(3, 19, 0)),
+      },
+      {
+        id: '80000000-0000-4000-8000-000000000003',
+        mentor_id: '10000000-0000-4000-8000-000000000105', // Jehan Ara
+        kind: 'update',
+        title: 'What NIC & Nest I/O Evaluators Look For in First-Time Student Pitches',
+        body: 'We do not expect polished revenue numbers at 16. We look for genuine field interviews with 10 real Pakistani customers and a clear unit-cost experiment.',
+        media_url: null,
+        event_at: null,
+      },
+      {
+        id: '80000000-0000-4000-8000-000000000004',
+        mentor_id: '10000000-0000-4000-8000-000000000101', // Azima Dhanjee
+        kind: 'masterclass',
+        title: 'Masterclass: Building Accessible Assistive Startups in Karachi',
+        body: 'Behind the scenes of co-founding ConnectHear and scaling Sign Language interpretation to hospitals and schools nationwide.',
+        media_url: 'https://youtu.be/dQw4w9WgXcQ',
+        event_at: null,
+      },
+    ];
+
+    const insertMentorUpdate = db.prepare(
+      `INSERT OR IGNORE INTO mentor_updates (id, mentor_id, kind, title, body, media_url, event_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const u of mentorUpdatesSeed) {
+      insertMentorUpdate.run(u.id, u.mentor_id, u.kind, u.title, u.body, u.media_url, u.event_at, hoursAgo(6));
+    }
+
+    // Seed initial follow so Waniyah sees followed updates out of the box
+    db.prepare(`INSERT OR IGNORE INTO mentor_follows (mentor_id, student_id, created_at) VALUES (?, ?, ?)`).run(
+      '10000000-0000-4000-8000-000000000001',
+      '20000000-0000-4000-8000-000000000001',
+      hoursAgo(24)
+    );
+
+    // 9. Seed Monthly Group Q&A Seminars inside Flagship & Core Groups
+    const groupSeminarsSeed = [
+      {
+        id: '91000000-0000-4000-8000-000000000001',
+        mentor_id: '10000000-0000-4000-8000-000000000001', // Ayesha Khan
+        group_id: '30000000-0000-4000-8000-000000000001', // Tech Explorers Pakistan
+        topic: 'Monthly Group Q&A: NUST / FAST / LUMS CS Admissions & Portfolio Prep',
+        meet_url: 'https://meet.google.com/out-tech-qna',
+        start_at: iso(daysFromNow(3, 19, 0)),
+      },
+      {
+        id: '91000000-0000-4000-8000-000000000002',
+        mentor_id: '10000000-0000-4000-8000-000000000105', // Jehan Ara
+        group_id: '30000000-0000-4000-8000-000000000006', // Pakistan Student Founders & NIC Circle
+        topic: 'Monthly Group Q&A: Idea Validation & Pitch Deck Clinic for Teens',
+        meet_url: 'https://meet.google.com/out-nic-qna',
+        start_at: iso(daysFromNow(5, 18, 0)),
+      },
+    ];
+    const insertSeminar = db.prepare(
+      `INSERT OR IGNORE INTO meetings (id, mentor_id, student_id, slot_id, type, group_id, topic, meet_url, status, created_at)
+       VALUES (?, ?, ?, NULL, 'group_seminar', ?, ?, ?, 'booked', ?)`
+    );
+    for (const gs of groupSeminarsSeed) {
+      // Note: store start_at ISO in mentor_notes or availability; let's create a group availability row or store start_at cleanly
+      const slotId = `slot-${gs.id}`;
+      db.prepare(`INSERT OR IGNORE INTO availability (id, mentor_id, start_at, end_at, is_booked) VALUES (?, ?, ?, ?, 1)`).run(
+        slotId,
+        gs.mentor_id,
+        gs.start_at,
+        iso(new Date(new Date(gs.start_at).getTime() + 60 * 60 * 1000))
+      );
+      insertSeminar.run(gs.id, gs.mentor_id, gs.mentor_id, gs.group_id, gs.topic, gs.meet_url, hoursAgo(10));
+      db.prepare(`UPDATE meetings SET slot_id = COALESCE(slot_id, ?) WHERE id = ?`).run(slotId, gs.id);
     }
   });
 

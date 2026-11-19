@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowRight, CheckCircle2, ShieldCheck, Video, Award, Building2 } from 'lucide-react';
+import { ArrowRight, CheckCircle2, ShieldCheck, Video, Award, Building2, ExternalLink } from 'lucide-react';
 import { apiFetch, useAuth } from '../lib/api';
 import { Avatar, BrandLogo, NicheIcon, OrbitDoodle, SparkDoodle, Starburst, VerifiedIcon } from '../components/BrandMark';
 import { formatReplyTime, type Niche } from '../shared/types';
@@ -13,6 +13,8 @@ interface MentorSummary {
   city: string | null;
   profession: string;
   company: string | null;
+  linkedin_url?: string;
+  talk_url?: string | null;
   niches: string[];
   avg_reply_hours: number | null;
   rating: number | null;
@@ -38,7 +40,10 @@ export default function LandingPage() {
       .then((d) => setNiches(d.niches.slice(0, 6)))
       .catch(() => {});
     apiFetch<{ mentors: MentorSummary[] }>('/api/explore')
-      .then((d) => setMentors(d.mentors.slice(0, 3)))
+      .then((d) => {
+        const sorted = [...d.mentors].sort((a, b) => (b.talk_url ? 1 : 0) - (a.talk_url ? 1 : 0));
+        setMentors(sorted.slice(0, 6));
+      })
       .catch(() => {});
   }, []);
 
@@ -193,7 +198,7 @@ export default function LandingPage() {
             <div className="rounded-3xl overflow-hidden border-2 border-[#252020] editorial-shadow bg-[#FFF5E8]">
               <img
                 src="/src/assets/images/hero_outspace_student_1795032880385.jpg"
-                alt="Pakistani high-school student exploring careers on Outspace"
+                alt="Pakistani high-school student exploring careers on Outpase"
                 referrerPolicy="no-referrer"
                 className="w-full h-auto object-cover"
               />
@@ -225,7 +230,7 @@ export default function LandingPage() {
             to={user ? '/explore?tab=careers' : '/signup'}
             className="text-sm font-bold text-[#C83D42] hover:underline whitespace-nowrap"
           >
-            View all 10 careers →
+            View all careers →
           </Link>
         </div>
 
@@ -273,37 +278,55 @@ export default function LandingPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {mentors.map((mentor) => (
-            <Link
+            <div
               key={mentor.id}
-              to={`/u/${mentor.id}`}
-              className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 flex items-start gap-4 hover:-translate-y-1 transition-transform"
+              className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 flex flex-col justify-between gap-4 hover:-translate-y-1 transition-transform"
             >
-              <Avatar src={mentor.avatar_url} name={mentor.full_name} size="lg" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-display font-bold text-base truncate">{mentor.full_name}</span>
-                  <VerifiedIcon />
+              <Link to={`/u/${mentor.id}`} className="flex items-start gap-4 min-w-0">
+                <Avatar src={mentor.avatar_url} name={mentor.full_name} size="lg" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-display font-bold text-base truncate hover:underline">{mentor.full_name}</span>
+                    <VerifiedIcon />
+                  </div>
+                  <div className="text-sm font-medium text-[#4D4242] truncate">
+                    {mentor.profession}
+                    {mentor.company ? ` · ${mentor.company}` : ''}
+                  </div>
+                  <div className="mt-2 text-xs text-[#6B5E5E] flex flex-wrap items-center gap-x-2 gap-y-1 tabular-nums">
+                    <span className="font-semibold text-[#252020]">
+                      {mentor.rating ? `${mentor.rating} ★` : 'New'}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>{mentor.sessions_completed} sessions</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{formatReplyTime(mentor.avg_reply_hours)}</span>
+                  </div>
+                  <div className="mt-2 text-xs font-semibold text-[#C83D42] truncate">
+                    {mentor.niches.map((n) => n.replace(/-/g, ' ')).join(' · ')}
+                  </div>
                 </div>
-                <div className="text-sm font-medium text-[#4D4242] truncate">
-                  {mentor.profession}
-                  {mentor.company ? ` · ${mentor.company}` : ''}
-                </div>
-                <div className="mt-2 text-xs text-[#6B5E5E] flex flex-wrap items-center gap-x-2 gap-y-1 tabular-nums">
-                  <span className="font-semibold text-[#252020]">
-                    {mentor.rating ? `${mentor.rating} ★` : 'New'}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span>{mentor.sessions_completed} sessions</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{formatReplyTime(mentor.avg_reply_hours)}</span>
-                </div>
-                <div className="mt-2.5 text-xs font-semibold text-[#C83D42] truncate">
-                  {mentor.niches.map((n) => n.replace(/-/g, ' ')).join(' · ')}
-                </div>
+              </Link>
+
+              <div className="pt-3 border-t border-[#252020]/10 flex items-center justify-between text-xs font-bold">
+                <Link to={`/u/${mentor.id}`} className="text-[#252020] hover:text-[#C83D42]">
+                  View Profile →
+                </Link>
+                {mentor.linkedin_url && (
+                  <a
+                    href={mentor.linkedin_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[#C83D42] hover:underline"
+                  >
+                    <span>LinkedIn</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       </motion.section>
@@ -321,7 +344,7 @@ export default function LandingPage() {
               Why guess a 4-year degree when you can ask in <span className="italic text-[#C83D42]">30 minutes?</span>
             </h2>
             <p className="mt-3 text-[#5A4F4F] text-base">
-              Too many students pick MBBS or engineering out of family pressure without talking to anyone in the job. Outspace turns guesswork into real mentorship.
+              Too many students pick MBBS or engineering out of family pressure without talking to anyone in the job. Outpase turns guesswork into real mentorship.
             </p>
           </div>
 
@@ -362,7 +385,7 @@ export default function LandingPage() {
               </div>
               <h3 className="font-display text-xl font-bold">For Pakistani Professionals</h3>
               <p className="text-sm text-[#4D4242] leading-relaxed">
-                Spend 45 minutes a week helping high-school students avoid years in the wrong degree. Host niche Q&amp;A groups and quizzes.
+                Spend 45 minutes a week helping high-school students avoid years in the wrong degree. Host niche Q&amp;A groups, video courses, and competitions.
               </p>
               <Link
                 to="/signup?role=mentor"
@@ -404,7 +427,7 @@ export default function LandingPage() {
         <div className="max-w-xl mb-10">
           <h2 className="font-display text-3xl sm:text-4xl font-bold">Simple student pricing in PKR</h2>
           <p className="mt-2 text-sm text-[#5A4F4F]">
-            Career guides, the Career Fit Quiz, groups, and mentor quizzes are always free.
+            Career guides, the Career Fit Quiz, video courses, monthly challenges, and groups are always free.
           </p>
         </div>
 

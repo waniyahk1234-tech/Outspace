@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import type { Profile, MentorDetails, Subscription } from '../shared/types';
+import type { Profile, MentorDetails, ProfessionalProfile, Subscription } from '../shared/types';
 
 export interface AuthUser extends Profile {
   email?: string;
   email_verified?: boolean;
   auth_provider?: string;
   mentor_details?: MentorDetails | null;
+  professional_profile?: ProfessionalProfile | null;
   subscription?: Subscription | null;
   pending_requests_count?: number;
 }
@@ -112,6 +113,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore
+    }
+    try {
+      const { signOutFirebase } = await import('./firebaseAuth');
+      await signOutFirebase();
     } catch {
       // ignore
     }

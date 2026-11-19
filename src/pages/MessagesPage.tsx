@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Send, ShieldAlert, Lock, Flag, Ban } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Send, ShieldAlert, Lock, Flag, Ban, UserPlus, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '../components/AppShell';
 import { Avatar, OrbitDoodle } from '../components/BrandMark';
@@ -34,8 +34,16 @@ interface PeerDetail {
   company?: string;
 }
 
+interface QuickMentorOption {
+  id: string;
+  full_name: string;
+  profession: string;
+  company: string | null;
+}
+
 export default function MessagesPage() {
   const { connectionId } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [messages, setMessages] = useState<MessageItem[]>([]);
@@ -43,6 +51,11 @@ export default function MessagesPage() {
   const [locked, setLocked] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [quickModal, setQuickModal] = useState(false);
+  const [quickMentors, setQuickMentors] = useState<QuickMentorOption[]>([]);
+  const [selectedMentorId, setSelectedMentorId] = useState('');
+  const [connectIntro, setConnectIntro] = useState('Assalam-o-Alaikum! I would love to learn about your career path and book a 1:1.');
+  const [connecting, setConnecting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadThreads = useCallback(() => {
@@ -102,11 +115,21 @@ export default function MessagesPage() {
     if (!connectionId || !draft.trim()) return;
     setSending(true);
     try {
-      const res = await apiFetch<{ message: MessageItem; was_masked: boolean }>(`/api/messages/${connectionId}`, {
+      const res = await apiFetch<{
+        message: MessageItem;
+        bot_reply?: MessageItem | null;
+        was_masked: boolean;
+      }>(`/api/messages/${connectionId}`, {
         method: 'POST',
         body: JSON.stringify({ body: draft }),
       });
-      setMessages((prev) => (prev.some((m) => m.id === res.message.id) ? prev : [...prev, res.message]));
+      setMessages((prev) => {
+        const next = prev.some((m) => m.id === res.message.id) ? [...prev] : [...prev, res.message];
+        if (res.bot_reply && !next.some((m) => m.id === res.bot_reply!.id)) {
+          next.push(res.bot_reply);
+        }
+        return next;
+      });
       setDraft('');
       loadThreads();
       if (res.was_masked) {
@@ -116,6 +139,50 @@ export default function MessagesPage() {
       toast.error((err as Error).message);
     } finally {
       setSending(false);
+    }
+  };
+
+  const openQuickConnect = async () => {
+    setQuickModal(true);
+    try {
+      const data = await apiFetch<{ mentors: QuickMentorOption[] }>('/api/explore');
+      const existingPeerIds = new Set(threads.map((t) => t.peer_id));
+      const available = data.mentors.filter((m) => !existingPeerIds.has(m.id));
+      setQuickMentors(available);
+      if (available[0]) {
+        setSelectedMentorId(available[0].id);
+      }
+    } catch {
+      toast.error('Unable to load mentors.');
+    }
+  };
+
+  const handleQuickConnect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMentorId) return;
+    setConnecting(true);
+    try {
+      const res = await apiFetch<{
+        ok: boolean;
+        id: string;
+        auto_accepted?: boolean;
+        bot_reply?: string;
+      }>('/api/connections', {
+        method: 'POST',
+        body: JSON.stringify({ receiver_id: selectedMentorId, message: connectIntro }),
+      });
+      setQuickModal(false);
+      loadThreads();
+      if (res.auto_accepted) {
+        toast.success('Mentor connected & sent an instant reply!');
+      } else {
+        toast.success('Connection request sent!');
+      }
+      navigate(`/messages/${res.id}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -139,7 +206,7 @@ export default function MessagesPage() {
         method: 'POST',
         body: JSON.stringify({ reported_id: peer.id, reason: 'Reported from direct message thread' }),
       });
-      toast.success('Report sent to Outspace safety team.');
+      toast.success('Report sent to Outpase safety team.');
     } catch (err) {
       toast.error((err as Error).message);
     }
@@ -154,19 +221,39 @@ export default function MessagesPage() {
             connectionId ? 'hidden md:flex' : 'flex'
           }`}
         >
-          <div className="p-4 border-b-2 border-[#252020]/15 bg-[#F6D66D]/35 font-display font-bold">
-            Conversations
+          <div className="p-4 border-b-2 border-[#252020]/15 bg-[#F6D66D]/35 flex items-center justify-between gap-2">
+            <span className="font-display font-bold">Conversations</span>
+            {user?.role === 'student' && (
+              <button
+                type="button"
+                onClick={openQuickConnect}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#C83D42] border border-[#252020] text-white text-[11px] font-bold hover:bg-[#B23237]"
+              >
+                <UserPlus className="w-3 h-3" />
+                <span>Connect Mentor</span>
+              </button>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto divide-y divide-[#252020]/10">
             {threads.length === 0 ? (
               <div className="p-6 text-sm text-[#5A4F4F] space-y-3">
                 <p>No active conversations yet.</p>
-                <Link
-                  to="/explore"
-                  className="inline-flex px-4 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold"
-                >
-                  Connect with a mentor →
-                </Link>
+                {user?.role === 'student' ? (
+                  <button
+                    type="button"
+                    onClick={openQuickConnect}
+                    className="inline-flex px-4 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold"
+                  >
+                    Connect with a mentor →
+                  </button>
+                ) : (
+                  <Link
+                    to="/explore"
+                    className="inline-flex px-4 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold"
+                  >
+                    Explore profiles →
+                  </Link>
+                )}
               </div>
             ) : (
               threads.map((t) => (
@@ -199,7 +286,7 @@ export default function MessagesPage() {
               <div className="w-16 h-16 rounded-2xl bg-[#FFF5E8] border-2 border-[#252020] flex items-center justify-center">
                 <OrbitDoodle />
               </div>
-              <div className="font-display font-bold text-lg">Your Outspace Inbox</div>
+              <div className="font-display font-bold text-lg">Your Outpase Inbox</div>
               <p className="text-sm text-[#6B5E5E] max-w-sm">
                 Select a conversation on the left to ask questions and plan your 1:1 mentorship session.
               </p>
@@ -241,7 +328,7 @@ export default function MessagesPage() {
 
               <div className="px-4 py-2 bg-[#FFF5E8] border-b border-[#252020]/15 flex items-center gap-2 text-xs font-medium text-[#4D4242]">
                 <ShieldAlert className="w-4 h-4 text-[#C83D42] shrink-0" />
-                <span>For your safety, contact details are hidden. Keep chats on Outspace.</span>
+                <span>For your safety, contact details are hidden. Keep chats on Outpase.</span>
               </div>
 
               <div className="flex-1 p-4 space-y-3 overflow-y-auto max-h-[420px]">
@@ -279,27 +366,116 @@ export default function MessagesPage() {
                   </Link>
                 </div>
               ) : (
-                <form onSubmit={sendMessage} className="p-3 border-t-2 border-[#252020]/15 flex items-center gap-2">
-                  <input
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    placeholder="Write a message..."
-                    className="flex-1 px-4 py-2.5 rounded-xl border-2 border-[#252020]/30 text-sm focus:outline-none focus:border-[#252020]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={sending || !draft.trim()}
-                    className="p-2.5 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white hover:bg-[#B23237] disabled:opacity-50"
-                    aria-label="Send message"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </form>
+                <div className="border-t-2 border-[#252020]/15">
+                  {peer.role === 'mentor' && (
+                    <div className="px-4 pt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#5A4F4F]">
+                      <span className="inline-flex items-center gap-1 font-bold text-[#252020]">
+                        <Sparkles className="w-3 h-3 text-[#C83D42]" />
+                        Instant mentor reply active:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDraft('What are your available 1:1 session slots this week?')}
+                        className="font-semibold text-[#C83D42] hover:underline"
+                      >
+                        Ask about 1:1 slots
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDraft('Which Pakistani university degree best prepares for this career?')}
+                        className="font-semibold text-[#C83D42] hover:underline"
+                      >
+                        Ask about universities
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDraft('Any advice for my monthly course competition pitch?')}
+                        className="font-semibold text-[#C83D42] hover:underline"
+                      >
+                        Ask about pitch
+                      </button>
+                    </div>
+                  )}
+                  <form onSubmit={sendMessage} className="p-3 flex items-center gap-2">
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="Write a message..."
+                      className="flex-1 px-4 py-2.5 rounded-xl border-2 border-[#252020]/30 text-sm focus:outline-none focus:border-[#252020]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={sending || !draft.trim()}
+                      className="p-2.5 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white hover:bg-[#B23237] disabled:opacity-50"
+                      aria-label="Send message"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </form>
+                </div>
               )}
             </>
           )}
         </div>
       </div>
+
+      {/* Quick Connect Mentor Modal */}
+      {quickModal && (
+        <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleQuickConnect}
+            className="bg-white rounded-3xl border-2 border-[#252020] editorial-shadow max-w-md w-full p-6 space-y-4"
+          >
+            <h3 className="font-display text-xl font-bold">Start Instant Mentor Conversation</h3>
+            <p className="text-xs text-[#5A4F4F]">
+              Send an introduction request and receive an instant mentor reply right inside Messages.
+            </p>
+            <div>
+              <label className="block text-xs font-bold mb-1.5">Choose a Verified Mentor</label>
+              <select
+                required
+                value={selectedMentorId}
+                onChange={(e) => setSelectedMentorId(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border-2 border-[#252020] bg-white text-sm focus:outline-none"
+              >
+                {quickMentors.length === 0 && <option value="">All mentors connected</option>}
+                {quickMentors.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.full_name} — {m.profession}
+                    {m.company ? ` @ ${m.company}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1.5">Your Intro Message</label>
+              <textarea
+                required
+                rows={3}
+                value={connectIntro}
+                onChange={(e) => setConnectIntro(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border-2 border-[#252020]/35 text-sm focus:outline-none focus:border-[#252020]"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setQuickModal(false)}
+                className="px-4 py-2 rounded-xl border-2 border-[#252020] text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={connecting || !selectedMentorId}
+                className="px-4 py-2 rounded-xl bg-[#C83D42] border-2 border-[#252020] text-white text-xs font-bold disabled:opacity-50"
+              >
+                {connecting ? 'Connecting...' : 'Connect & Open Chat'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </AppShell>
   );
 }

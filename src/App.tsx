@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider } from './lib/api';
 import { RequireAuth } from './components/AppShell';
@@ -20,7 +20,8 @@ import ConnectionsPage from './pages/ConnectionsPage';
 import MessagesPage from './pages/MessagesPage';
 import { GroupDetailPage, GroupsListPage } from './pages/GroupsPage';
 import SessionsPage from './pages/SessionsPage';
-import { NewQuizPage, QuizzesListPage, TakeQuizPage } from './pages/QuizzesPages';
+import { CourseDetailPage, CoursesListPage } from './pages/CoursesPages';
+import LeaderboardPage from './pages/LeaderboardPage';
 import { CertificateDetailPage, VerifyCertificatePage } from './pages/CertificatesPages';
 import PricingPage from './pages/PricingPage';
 import { AdminPage, NotFoundPage, SettingsPage } from './pages/AdminAndSettingsPages';
@@ -130,29 +131,31 @@ export default function App() {
             }
           />
           <Route
-            path="/quizzes"
+            path="/courses"
             element={
               <RequireAuth>
-                <QuizzesListPage />
+                <CoursesListPage />
               </RequireAuth>
             }
           />
           <Route
-            path="/quizzes/new"
+            path="/courses/:id"
             element={
               <RequireAuth>
-                <NewQuizPage />
+                <CourseDetailPage />
               </RequireAuth>
             }
           />
           <Route
-            path="/quizzes/:id"
+            path="/leaderboard"
             element={
               <RequireAuth>
-                <TakeQuizPage />
+                <LeaderboardPage />
               </RequireAuth>
             }
           />
+          <Route path="/quizzes/*" element={<Navigate to="/courses" replace />} />
+          <Route path="/quizzes" element={<Navigate to="/courses" replace />} />
           <Route
             path="/certificates/:id"
             element={

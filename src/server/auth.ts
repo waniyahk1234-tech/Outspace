@@ -26,7 +26,16 @@ export function verifySignedToken(token: string | undefined): string | null {
   return null;
 }
 
-export function signOAuthState(payload: { provider: 'google' | 'linkedin'; role: 'student' | 'mentor' }): string {
+export interface OAuthStatePayload {
+  provider: 'google' | 'linkedin';
+  role: 'student' | 'mentor';
+  mode?: 'popup' | 'redirect';
+  returnOrigin?: string;
+  returnPath?: string;
+  linkUserId?: string;
+}
+
+export function signOAuthState(payload: OAuthStatePayload): string {
   const data = Buffer.from(
     JSON.stringify({
       ...payload,
@@ -38,24 +47,28 @@ export function signOAuthState(payload: { provider: 'google' | 'linkedin'; role:
   return `${data}.${sig}`;
 }
 
-export function verifyOAuthState(
-  state: string | undefined
-): { provider: 'google' | 'linkedin'; role: 'student' | 'mentor' } | null {
+export function verifyOAuthState(state: string | undefined): OAuthStatePayload | null {
   if (!state || !state.includes('.')) return null;
   const [data, sig] = state.split('.');
   if (!data || !sig) return null;
   const expected = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url');
   try {
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    const parsed = JSON.parse(Buffer.from(data, 'base64url').toString('utf8')) as {
-      provider: 'google' | 'linkedin';
-      role: 'student' | 'mentor';
+    const parsed = JSON.parse(Buffer.from(data, 'base64url').toString('utf8')) as OAuthStatePayload & {
       exp: number;
     };
     if (!parsed.exp || parsed.exp < Date.now()) return null;
     if (!['google', 'linkedin'].includes(parsed.provider)) return null;
     if (!['student', 'mentor'].includes(parsed.role)) return null;
-    return { provider: parsed.provider, role: parsed.role };
+    const allowedReturnPaths = ['/login', '/signup', '/settings', '/onboarding'];
+    return {
+      provider: parsed.provider,
+      role: parsed.role,
+      mode: parsed.mode === 'redirect' ? 'redirect' : 'popup',
+      returnOrigin: typeof parsed.returnOrigin === 'string' ? parsed.returnOrigin : undefined,
+      returnPath: allowedReturnPaths.includes(parsed.returnPath || '') ? parsed.returnPath : '/login',
+      linkUserId: typeof parsed.linkUserId === 'string' && parsed.linkUserId ? parsed.linkUserId : undefined,
+    };
   } catch {
     return null;
   }

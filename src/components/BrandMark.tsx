@@ -17,26 +17,41 @@ import {
   BookOpen,
   MessageSquareHeart,
   BadgeCheck,
+  HeartHandshake,
+  Video,
 } from 'lucide-react';
 import { BADGE_META } from '../shared/types';
 
 export function BrandLogo({ className = '' }: { className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-2.5 whitespace-nowrap shrink-0 ${className}`}>
-      <svg width="30" height="30" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-        <circle cx="18" cy="18" r="10" fill="#F6D66D" stroke="#252020" strokeWidth="2.3" />
-        <ellipse
-          cx="18"
-          cy="18"
-          rx="16"
-          ry="5.5"
-          transform="rotate(-24 18 18)"
+    <span
+      className={`inline-flex items-center gap-0.5 whitespace-nowrap shrink-0 select-none ${className}`}
+      aria-label="Outpase"
+    >
+      <svg width="34" height="32" viewBox="0 0 38 36" fill="none" aria-hidden="true" className="shrink-0">
+        {/* Upper-left ring arc */}
+        <path
+          d="M 24.6 10.2 A 11.5 11.5 0 1 0 7.2 25.0"
           stroke="#C83D42"
-          strokeWidth="2.5"
+          strokeWidth="4.4"
+          strokeLinecap="butt"
         />
-        <circle cx="29" cy="8.5" r="3.2" fill="#C83D42" stroke="#252020" strokeWidth="1.5" />
+        {/* Lower-right ring arc */}
+        <path
+          d="M 10.6 28.6 A 11.5 11.5 0 0 0 28.4 15.6"
+          stroke="#C83D42"
+          strokeWidth="4.4"
+          strokeLinecap="butt"
+        />
+        {/* Diagonal upward swoosh arrow */}
+        <path
+          d="M 2.2 27.6 Q 15.8 19.6 28.4 10.4 L 25.5 8.1 L 35.4 5.8 L 31.6 15.2 L 29.7 12.6 Q 16.5 21.8 2.2 27.6 Z"
+          fill="#C83D42"
+        />
       </svg>
-      <span className="font-display text-xl font-bold tracking-tight text-[#252020]">Outspace</span>
+      <span className="font-display text-[22px] font-bold tracking-[-0.03em] text-[#252020] leading-none">
+        utpase
+      </span>
     </span>
   );
 }
@@ -173,6 +188,7 @@ export function NicheIcon({ name, className = 'w-5 h-5' }: { name: string; class
     BarChart3,
     Rocket,
     Calculator,
+    HeartHandshake,
   };
   const Icon = map[name] || Compass;
   return <Icon className={className} />;
@@ -190,6 +206,8 @@ export function BadgeChip({ type, label }: { type: string; label: string }) {
     seminar_5: Star,
     quiz_ace: BookOpen,
     contributor: MessageSquareHeart,
+    course_fellow: Video,
+    competition_honours: Trophy,
   };
   const stickerColors: Record<string, string> = {
     explorer: 'bg-[#F6D66D]',
@@ -198,10 +216,12 @@ export function BadgeChip({ type, label }: { type: string; label: string }) {
     seminar_5: 'bg-[#F6D66D]',
     quiz_ace: 'bg-[#F7A98A]',
     contributor: 'bg-[#FFF5E8]',
+    course_fellow: 'bg-[#F6D66D]',
+    competition_honours: 'bg-[#C83D42] text-white',
   };
   const Icon = icons[type] || Award;
   const bg = stickerColors[type] || 'bg-[#F6D66D]';
-  const isRed = type === 'three_sessions';
+  const isRed = type === 'three_sessions' || type === 'competition_honours';
 
   return (
     <div

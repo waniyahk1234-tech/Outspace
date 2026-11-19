@@ -74,7 +74,7 @@ export default function PricingPage() {
           <Starburst size={26} color="#F6D66D" />
           <div>
             <h1 className="font-display text-2xl sm:text-3xl font-bold">
-              Your <span className="italic text-[#C83D42]">Outspace</span> Plan
+              Your <span className="italic text-[#C83D42]">Outpase</span> Plan
             </h1>
             <p className="text-sm text-[#5A4F4F] mt-0.5">
               Browse careers, take quizzes, and join niche groups free forever. Unlock unlimited 1:1 mentor sessions and
@@ -187,7 +187,7 @@ export default function PricingPage() {
                 <span>I have an institution code</span>
               </div>
               <p className="text-xs text-[#4D4242]">
-                If your school or college partnered with Outspace, enter your access code (demo code:{' '}
+                If your school or college partnered with Outpase, enter your access code (demo code:{' '}
                 <span className="font-mono font-bold text-[#252020]">DEMO2026</span>).
               </p>
               <div className="flex flex-col sm:flex-row gap-2.5 pt-1">

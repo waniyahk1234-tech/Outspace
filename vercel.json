@@ -6,16 +6,35 @@
   "functions": {
     "api/index.ts": {
       "maxDuration": 30,
-      "includeFiles": "{src/server/**,src/shared/**}"
+      "includeFiles": "{src/server/**,src/shared/**,firebase-applet-config.json}"
     }
   },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        }
+      ]
+    }
+  ],
   "rewrites": [
+    {
+      "source": "/__/auth/(.*)",
+      "destination": "https://gen-lang-client-0881266899.firebaseapp.com/__/auth/$1"
+    },
+    {
+      "source": "/__/firebase/(.*)",
+      "destination": "https://gen-lang-client-0881266899.firebaseapp.com/__/firebase/$1"
+    },
     {
       "source": "/api/(.*)",
       "destination": "/api/index.ts"
     },
     {
-      "source": "/((?!api/|assets/|src/assets/).*)",
+      "source": "/((?!api/|__/|assets/|src/assets/).*)",
       "destination": "/index.html"
     }
   ]

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Search, ArrowRight } from 'lucide-react';
+import { Search, ArrowRight, BellPlus, BellRing } from 'lucide-react';
+import { toast } from 'sonner';
 import { AppShell } from '../components/AppShell';
 import { Avatar, EmptyStateArt, NicheIcon, Starburst, VerifiedIcon } from '../components/BrandMark';
-import { apiFetch } from '../lib/api';
+import { apiFetch, useAuth } from '../lib/api';
 import { formatReplyTime, type Niche } from '../shared/types';
 
 interface MentorCard {
@@ -14,7 +15,14 @@ interface MentorCard {
   city: string | null;
   profession: string;
   company: string | null;
+  linkedin_url?: string;
+  talk_url?: string | null;
   niches: string[];
+  topics?: string[];
+  vip_partner?: string | null;
+  monthly_connections_used?: number;
+  monthly_connections_limit?: number;
+  is_following?: boolean;
   avg_reply_hours: number | null;
   rating: number | null;
   sessions_completed: number;
@@ -31,12 +39,14 @@ interface StudentCard {
 }
 
 export default function ExplorePage() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as 'mentors' | 'students' | 'careers') || 'mentors';
+  const initialNiche = searchParams.get('niche') || '';
 
   const [tab, setTab] = useState<'mentors' | 'students' | 'careers'>(initialTab);
   const [q, setQ] = useState('');
-  const [niche, setNiche] = useState('');
+  const [niche, setNiche] = useState(initialNiche);
   const [city, setCity] = useState('');
   const [mentors, setMentors] = useState<MentorCard[]>([]);
   const [students, setStudents] = useState<StudentCard[]>([]);
@@ -66,6 +76,24 @@ export default function ExplorePage() {
     setSearchParams({ tab: next });
   };
 
+  const toggleFollow = async (mentorId: string, currentlyFollowing: boolean) => {
+    try {
+      await apiFetch(`/api/mentors/${mentorId}/follow`, {
+        method: currentlyFollowing ? 'DELETE' : 'POST',
+      });
+      setMentors((prev) =>
+        prev.map((m) => (m.id === mentorId ? { ...m, is_following: !currentlyFollowing } : m))
+      );
+      toast.success(
+        currentlyFollowing
+          ? 'Unfollowed mentor updates.'
+          : 'Following! Their masterclasses and cohort updates will appear on your dashboard.'
+      );
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const nichePalette = [
     'bg-[#C83D42] text-white',
     'bg-[#F6D66D] text-[#252020]',
@@ -82,10 +110,10 @@ export default function ExplorePage() {
             <Starburst size={24} color="#F6D66D" />
             <div>
               <h1 className="font-display text-3xl font-bold">
-                Explore <span className="italic text-[#C83D42]">Outspace</span>
+                Explore <span className="italic text-[#C83D42]">Outpase</span>
               </h1>
               <p className="text-sm text-[#5A4F4F]">
-                Find verified mentors sorted by reply speed, meet peers, or browse 10 Pakistani careers.
+                Follow verified mentors for free updates &amp; masterclasses, discover peers, or explore career tracks.
               </p>
             </div>
           </div>
@@ -124,7 +152,7 @@ export default function ExplorePage() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by name, profession, company, or school..."
+              placeholder="Search by name, topic, profession, company, or school..."
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-[#252020] bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#F6D66D]"
             />
           </div>
@@ -152,6 +180,7 @@ export default function ExplorePage() {
               <option value="Karachi">Karachi</option>
               <option value="Lahore">Lahore</option>
               <option value="Islamabad">Islamabad</option>
+              <option value="Rawalpindi">Rawalpindi</option>
             </select>
           </div>
         </div>
@@ -182,37 +211,69 @@ export default function ExplorePage() {
             />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {mentors.map((m) => (
-                <Link
-                  key={m.id}
-                  to={`/u/${m.id}`}
-                  className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 hover:-translate-y-0.5 transition-transform flex flex-col justify-between gap-4"
-                >
-                  <div className="flex items-start gap-3.5">
-                    <Avatar src={m.avatar_url} name={m.full_name} size="lg" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <h3 className="font-display font-bold text-base truncate">{m.full_name}</h3>
-                        <VerifiedIcon />
+              {mentors.map((m) => {
+                const limit = m.monthly_connections_limit ?? 30;
+                const used = m.monthly_connections_used ?? 0;
+                const spotsLeft = Math.max(0, limit - used);
+                return (
+                  <div
+                    key={m.id}
+                    className="bg-white rounded-2xl border-2 border-[#252020] editorial-shadow-sm p-5 hover:-translate-y-0.5 transition-transform flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-3">
+                      <Link to={`/u/${m.id}`} className="flex items-start gap-3.5 min-w-0">
+                        <Avatar src={m.avatar_url} name={m.full_name} size="lg" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="font-display font-bold text-base truncate hover:underline">{m.full_name}</h3>
+                            <VerifiedIcon />
+                          </div>
+                          <p className="text-sm font-medium text-[#4D4242] truncate">
+                            {m.profession}
+                            {m.company ? ` @ ${m.company}` : ''}
+                          </p>
+                          <div className="mt-1 text-xs text-[#6B5E5E] truncate">
+                            {m.city || 'Pakistan'} · {m.niches.map((s) => s.replace(/-/g, ' ')).join(', ')}
+                          </div>
+                        </div>
+                      </Link>
+
+                      {m.topics && m.topics.length > 0 && (
+                        <div className="text-[11px] text-[#4D4242] line-clamp-1">
+                          <span className="font-bold text-[#252020]">Teaches:</span> {m.topics.slice(0, 3).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-[#252020]/10 flex items-center justify-between gap-2 text-xs text-[#5A4F4F] tabular-nums">
+                      <div className="min-w-0 truncate">
+                        <span className="font-semibold">{formatReplyTime(m.avg_reply_hours)}</span>
+                        <span className="mx-1">·</span>
+                        <span className={spotsLeft === 0 ? 'text-[#C83D42] font-bold' : ''}>
+                          {spotsLeft}/{limit} spots
+                        </span>
                       </div>
-                      <p className="text-sm font-medium text-[#4D4242] truncate">
-                        {m.profession}
-                        {m.company ? ` @ ${m.company}` : ''}
-                      </p>
-                      <div className="mt-1.5 text-xs text-[#6B5E5E]">
-                        {m.city || 'Pakistan'} · {m.niches.map((s) => s.replace(/-/g, ' ')).join(', ')}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {user && user.role === 'student' && (
+                          <button
+                            type="button"
+                            onClick={() => toggleFollow(m.id, Boolean(m.is_following))}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-[#252020] text-[11px] font-bold transition-colors ${
+                              m.is_following ? 'bg-[#F6D66D] text-[#252020]' : 'bg-[#FFF5E8] hover:bg-[#F6D66D]/50'
+                            }`}
+                          >
+                            {m.is_following ? <BellRing className="w-3 h-3" /> : <BellPlus className="w-3 h-3" />}
+                            <span>{m.is_following ? 'Following' : 'Follow'}</span>
+                          </button>
+                        )}
+                        <Link to={`/u/${m.id}`} className="font-bold text-[#C83D42] hover:underline">
+                          Profile →
+                        </Link>
                       </div>
                     </div>
                   </div>
-
-                  <div className="pt-3 border-t border-[#252020]/10 flex items-center justify-between text-xs text-[#5A4F4F] tabular-nums">
-                    <span className="font-semibold">{formatReplyTime(m.avg_reply_hours)}</span>
-                    <span className="font-bold text-[#252020]">
-                      {m.rating ? `${m.rating} ★` : 'New'} · {m.sessions_completed} sessions
-                    </span>
-                  </div>
-                </Link>
-              ))}
+                );
+              })}
             </div>
           )
         ) : tab === 'students' ? (
@@ -263,8 +324,11 @@ export default function ExplorePage() {
                     <span className="text-xs font-mono opacity-85 shrink-0">{n.salary_range_pkr}</span>
                   </div>
                   <p className="text-sm opacity-90 mt-1 line-clamp-2">{n.description}</p>
-                  <div className="mt-2 text-xs opacity-80">
-                    Universities: {n.universities.slice(0, 3).join(', ')}
+                  <div className="mt-2 text-xs opacity-85 flex flex-wrap items-center justify-between gap-2">
+                    <span className="truncate">Universities: {n.universities.slice(0, 3).join(', ')}</span>
+                    <span className="font-bold underline">
+                      {n.is_active_track ? 'Active Course & Challenge' : 'Courses Coming Soon'}
+                    </span>
                   </div>
                 </div>
               </Link>

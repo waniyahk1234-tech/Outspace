@@ -81,7 +81,7 @@ export function QuizzesListPage() {
 
                 <div className="pt-3 border-t border-[#252020]/15 flex items-center justify-between text-xs text-[#252020] tabular-nums">
                   <span className="font-medium">
-                    {q.question_count} questions · {q.is_career_fit ? 'Outspace Official' : `By ${q.author_name}`}
+                    {q.question_count} questions · {q.is_career_fit ? 'Outpase Official' : `By ${q.author_name}`}
                   </span>
                   <span className="font-bold text-[#C83D42]">
                     {q.best_attempt_score !== null ? `Latest: ${q.best_attempt_score}%` : 'Start →'}
