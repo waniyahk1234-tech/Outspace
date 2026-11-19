@@ -23,6 +23,7 @@
     "@google/genai": "^2.4.0",
     "@hookform/resolvers": "^7.0.7",
     "@tailwindcss/vite": "^4.3.3",
+    "@vercel/analytics": "^2.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^9.6.0",
     "@types/cookie-parser": "^1.4.10",
