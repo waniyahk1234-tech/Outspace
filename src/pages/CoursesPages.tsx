@@ -858,7 +858,7 @@ export function CourseDetailPage() {
                       <div className="aspect-video w-full p-6 sm:p-8 flex flex-col justify-between bg-gradient-to-br from-[#252020] via-[#312626] to-[#252020]">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#F6D66D]">
-                            Module {activeModule.position} · Outpase Studio Player
+                            Module {activeModule.position} · Outpace Studio Player
                           </span>
                           <span className="text-xs font-mono text-white/80 tabular-nums">
                             {formatDurationClock(simElapsed)} / {formatDurationClock(activeModule.duration_seconds)}
