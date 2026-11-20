@@ -56,11 +56,11 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Outspace server running on http://localhost:${PORT}`);
+    console.log(`Outpase server running on http://localhost:${PORT}`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('Failed to start Outspace server:', err);
+  console.error('Failed to start Outpase server:', err);
   process.exit(1);
 });

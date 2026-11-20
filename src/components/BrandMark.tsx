@@ -25,32 +25,61 @@ import { BADGE_META } from '../shared/types';
 export function BrandLogo({ className = '' }: { className?: string }) {
   return (
     <span
-      className={`inline-flex items-center gap-0.5 whitespace-nowrap shrink-0 select-none ${className}`}
+      className={`inline-flex items-center whitespace-nowrap shrink-0 select-none ${className}`}
       aria-label="Outpase"
     >
-      <svg width="34" height="32" viewBox="0 0 38 36" fill="none" aria-hidden="true" className="shrink-0">
+      <svg width="34" height="32" viewBox="0 0 38 36" fill="none" aria-hidden="true" className="shrink-0 mr-[1px]">
+        <defs>
+          <linearGradient id="outpase-o-crimson" x1="4" y1="30" x2="34" y2="6" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#9E1B20" />
+            <stop offset="55%" stopColor="#C83D42" />
+            <stop offset="100%" stopColor="#E04B50" />
+          </linearGradient>
+        </defs>
         {/* Upper-left ring arc */}
         <path
           d="M 24.6 10.2 A 11.5 11.5 0 1 0 7.2 25.0"
-          stroke="#C83D42"
-          strokeWidth="4.4"
+          stroke="url(#outpase-o-crimson)"
+          strokeWidth="4.6"
           strokeLinecap="butt"
         />
         {/* Lower-right ring arc */}
         <path
           d="M 10.6 28.6 A 11.5 11.5 0 0 0 28.4 15.6"
-          stroke="#C83D42"
-          strokeWidth="4.4"
+          stroke="url(#outpase-o-crimson)"
+          strokeWidth="4.6"
           strokeLinecap="butt"
         />
         {/* Diagonal upward swoosh arrow */}
         <path
-          d="M 2.2 27.6 Q 15.8 19.6 28.4 10.4 L 25.5 8.1 L 35.4 5.8 L 31.6 15.2 L 29.7 12.6 Q 16.5 21.8 2.2 27.6 Z"
-          fill="#C83D42"
+          d="M 1.8 27.8 Q 15.8 19.4 28.4 10.2 L 25.4 7.9 L 35.6 5.6 L 31.8 15.2 L 29.8 12.5 Q 16.5 21.8 1.8 27.8 Z"
+          fill="url(#outpase-o-crimson)"
         />
       </svg>
       <span className="font-display text-[22px] font-bold tracking-[-0.03em] text-[#252020] leading-none">
-        utpase
+        utpa
+      </span>
+      <svg
+        width="19"
+        height="26"
+        viewBox="0 0 28 32"
+        fill="none"
+        aria-hidden="true"
+        className="shrink-0 -mx-[1px] translate-y-[1px]"
+      >
+        {/* Upper sweeping ribbon of the S path */}
+        <path
+          d="M 25.8 1.8 C 14.0 2.6, 4.6 6.8, 4.6 11.6 C 4.6 14.5, 9.2 15.8, 17.6 16.9 C 14.0 14.4, 11.2 12.4, 11.4 10.2 C 11.6 7.4, 17.4 4.8, 25.8 1.8 Z"
+          fill="#252020"
+        />
+        {/* Lower sweeping ribbon of the S path */}
+        <path
+          d="M 2.2 30.2 C 14.0 29.4, 23.4 25.2, 23.4 20.4 C 23.4 17.5, 18.8 16.2, 10.4 15.1 C 14.0 17.6, 16.8 19.6, 16.6 21.8 C 16.4 24.6, 10.6 27.2, 2.2 30.2 Z"
+          fill="#252020"
+        />
+      </svg>
+      <span className="font-display text-[22px] font-bold tracking-[-0.03em] text-[#252020] leading-none">
+        e
       </span>
     </span>
   );

@@ -209,7 +209,13 @@ async function connectWithFallbacks(
 export async function initMongoBridge(sqliteDb: Database.Database): Promise<void> {
   const rawUri = process.env.MONGODB_URI?.trim();
   if (!rawUri) {
-    console.log('[MongoDB] MONGODB_URI not set — running with local SQLite (outspace.db). Set MONGODB_URI to connect MongoDB.');
+    console.log('[MongoDB] MONGODB_URI not set — running with local SQLite (outspace.db).');
+    return;
+  }
+
+  if (/<db_password>|<password>|YOUR_PASSWORD/i.test(rawUri)) {
+    mongoLastError = 'MONGODB_URI contains an unreplaced placeholder password; using local SQLite cache.';
+    console.log('[MongoDB] Placeholder password detected in MONGODB_URI — running with local SQLite cache.');
     return;
   }
 
@@ -222,7 +228,7 @@ export async function initMongoBridge(sqliteDb: Database.Database): Promise<void
   try {
     const connection = await connectWithFallbacks(normalized, dbName);
     if (normalized.hasAngleBracketPassword) {
-      console.warn('[MongoDB] Connected after stripping < > brackets around password. Update MONGODB_URI to remove < >.');
+      console.log('[MongoDB] Connected after stripping < > brackets around password.');
     }
 
     mongoClient = connection.client;
@@ -238,7 +244,7 @@ export async function initMongoBridge(sqliteDb: Database.Database): Promise<void
     const existingUsers = await mongoDb.collection('auth_users').countDocuments();
     if (existingUsers === 0) {
       await pushAllSqliteToMongo(sqliteDb);
-      console.log('[MongoDB] Initialized MongoDB collections with Outspace seed data.');
+      console.log('[MongoDB] Initialized MongoDB collections with Outpase seed data.');
     } else {
       await pullMongoChangesIntoSqlite(sqliteDb);
       console.log(`[MongoDB] Hydrated runtime cache from ${existingUsers} MongoDB user records.`);
@@ -255,7 +261,7 @@ export async function initMongoBridge(sqliteDb: Database.Database): Promise<void
     } else {
       mongoLastError = baseMsg;
     }
-    console.warn('[MongoDB] Connection unavailable, falling back to local SQLite:', mongoLastError);
+    console.log(`[MongoDB] Running on local SQLite fallback (${mongoLastError}).`);
   }
 }
 
